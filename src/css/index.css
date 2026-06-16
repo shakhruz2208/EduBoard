@@ -1,0 +1,6 @@
+@import 'tailwindcss';
+
+.active{
+    border-bottom: 2px;
+    border-bottom-color: indigo;
+}
