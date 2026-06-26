@@ -3,6 +3,7 @@ import { useState, lazy, Suspense } from 'react';
 import ProtectedRoute from './components/ProtectedRoute';
 import TeacherProfile from './TeacherComponents/TeacherProfile';
 import StudentProfile from './StudentComponents/StudentProfile';
+import { AvatarProvider } from './components/AvatarContext';
 
 const Register = lazy(() => import('./components/Register'));
 const Login = lazy(() => import('./components/Login'));
@@ -17,9 +18,9 @@ const App = () => {
   })
 
   return (
-    <div>
+    <AvatarProvider>
       <BrowserRouter>
-        <Suspense fallback={<div>Loading...</div>}>
+        <Suspense fallback={<div className='text-5xl text-center font-bold pt-55'>Loading...</div>}>
           <Routes>
             <Route path='/' element={<Navigate to='/register' />} />
             <Route path='/register' element={<Register setIsAuth={setIsAuth} isAuth={isAuth} />} />
@@ -31,12 +32,13 @@ const App = () => {
               <Route path='/student-dashboard' element={<StudentDashboard setIsAuth={setIsAuth} />} />
               <Route path='/students-rating' element={<StudentRating setIsAuth={setIsAuth} />} />
               <Route path='/teacher-students' element={<TeacherStudents setIsAuth={setIsAuth} />} />
+              
             </Route >
             <Route path='*' element={<Navigate to='/' replace />} />
           </Routes>
         </Suspense>
       </BrowserRouter>
-    </div>
+    </AvatarProvider>
   )
 }
 
