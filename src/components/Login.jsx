@@ -1,4 +1,4 @@
-import { FaEnvelope, FaLock, FaUser, FaKey } from "react-icons/fa"
+import { FaEnvelope, FaLock, FaKey } from "react-icons/fa"
 import { Link, useNavigate } from "react-router-dom"
 import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"

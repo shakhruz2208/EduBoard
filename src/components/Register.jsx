@@ -161,7 +161,6 @@ const Register = ({ setIsAuth, isAuth }) => {
               </div>
             </div>
 
-            {/* Secret Code Input */}
             {registerData.role === "teacher" && (
               <div className="flex flex-col gap-2">
                 <label className="text-xs font-bold text-red-400 uppercase tracking-wider">Secret Code *</label>
@@ -180,7 +179,6 @@ const Register = ({ setIsAuth, isAuth }) => {
               </div>
             )}
 
-            {/* Remember me */}
             <div className="flex items-center gap-2 py-0.5">
               <input
                 type="checkbox"
@@ -194,7 +192,6 @@ const Register = ({ setIsAuth, isAuth }) => {
               </label>
             </div>
 
-            {/* Register Button & Login Link */}
             <div className="flex flex-col gap-1 mt-2">
               <button
                 type="submit"
