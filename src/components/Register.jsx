@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom"
 import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"
 import { useEffect, useState } from "react"
+import { toast } from "react-toastify"
 
 const Register = ({ setIsAuth, isAuth }) => {
   const navigate = useNavigate();
@@ -16,7 +17,7 @@ const Register = ({ setIsAuth, isAuth }) => {
   });
 
   const [rememberMe, setRememberMe] = useState(false);
-  const TEACHER_SECRET_KEY = "MAKTAB_TECH_2026";
+  const TEACHER_SECRET_KEY = "MAKTEB_TECH_2026";
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -29,21 +30,31 @@ const Register = ({ setIsAuth, isAuth }) => {
 
   const handleRegister = (e) => {
     e.preventDefault();
-    const userData = {
-    fullName: registerData.fullName,
-    email: registerData.email,
-    role: registerData.role
-  };
 
-  localStorage.setItem("userProfile", JSON.stringify(userData));
-    if (registerData.role === 'teacher' && registerData.secretCode !== TEACHER_SECRET_KEY) {
-      alert("Error: Secret code is incorrect");
+    const existingEmail = localStorage.getItem("email");
+    if (existingEmail && existingEmail === registerData.email) {
+      toast.error("Error: This email is already registered. Please login!");
       return;
     }
 
+    if (registerData.role === 'teacher' && registerData.secretCode !== TEACHER_SECRET_KEY) {
+      toast.error("Error: Secret code is incorrect");
+      return;
+    }
+
+    localStorage.setItem("fullName", registerData.fullName);
+    localStorage.setItem("email", registerData.email);
+    localStorage.setItem("password", registerData.password);
+    localStorage.setItem("role", registerData.role);
     localStorage.setItem("auth", "true");
-    localStorage.setItem("role", registerData.role); 
-    
+
+    const userData = {
+      fullName: registerData.fullName,
+      email: registerData.email,
+      role: registerData.role
+    };
+    localStorage.setItem("userProfile", JSON.stringify(userData));
+
     if (rememberMe) {
       localStorage.setItem("rememberMe", "true");
       localStorage.setItem("savedFullName", registerData.fullName);
@@ -54,12 +65,12 @@ const Register = ({ setIsAuth, isAuth }) => {
       localStorage.removeItem("savedEmail");
     }
 
-    setIsAuth(true); 
+    setIsAuth(true);
 
     if (registerData.role === "teacher") {
-      navigate("/teacher-dashboard");
+      navigate("/teacher-dashboard", { replace: true });
     } else {
-      navigate("/student-dashboard");
+      navigate("/student-dashboard", { replace: true });
     }
   };
 
@@ -83,34 +94,25 @@ const Register = ({ setIsAuth, isAuth }) => {
       }
     }
   }, [isAuth, navigate]);
-  localStorage.setItem('fullName' , registerData.fullName)
-  localStorage.setItem('email' , registerData.email)
-  localStorage.setItem('password' , registerData.password)
+
   return (
     <div className="w-full relative min-h-screen animated-bg p-4 flex flex-col items-center justify-center">
       <MatrixBg />
 
-     
       <form onSubmit={handleRegister} className="w-full max-w-[420px] relative z-10">
-        
-        
         <div className="flex flex-col text-white gap-2 text-center pb-5">
           <h1 className="text-3xl sm:text-4xl font-extrabold tracking-wide">DevsClub.uz</h1>
           <p className="text-sm sm:text-base text-slate-400">A New Step Towards Knowledge</p>
         </div>
 
-        
         <div className="bg-indigo-950/90 backdrop-blur-sm shadow-2xl shadow-indigo-900/50 w-full rounded-2xl p-6 sm:p-8 pb-6 border border-indigo-900/50">
           <h1 className="text-white text-2xl sm:text-3xl font-bold pb-4">Register</h1>
-          
+
           <div className="flex flex-col gap-5">
-            
-          
             <div>
               <RoleToggle activeRole={registerData.role} onChange={handleRoleChange} />
             </div>
 
-       
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">FullName</label>
               <div className="relative flex items-center">
@@ -127,7 +129,6 @@ const Register = ({ setIsAuth, isAuth }) => {
               </div>
             </div>
 
-         
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email</label>
               <div className="relative flex items-center">
@@ -144,7 +145,6 @@ const Register = ({ setIsAuth, isAuth }) => {
               </div>
             </div>
 
-           
             <div className="flex flex-col gap-2">
               <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Password</label>
               <div className="relative flex items-center">

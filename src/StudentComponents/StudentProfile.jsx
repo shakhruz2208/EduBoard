@@ -1,9 +1,11 @@
-import React from 'react'
+import IconsBg from '../SmallComponents/IconsBg'
+import StudentPrCard from '../SmallComponents/StudentPrCard'
 
-const StudentProfile = () => {
+const StudentProfile = ({setIsAuth}) => {
   return (
-    <div>
-      
+    <div className='relative p-10'>
+      <IconsBg/>
+      <StudentPrCard setIsAuth={setIsAuth}/>
     </div>
   )
 }

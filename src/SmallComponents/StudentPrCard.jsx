@@ -1,17 +1,13 @@
 import { useState, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import {
-  IconPencil, IconCrown, IconMail,
+  IconPencil, IconSchool, IconMail,
   IconLock, IconLogout, IconX, IconCheck,
   IconTrash
 } from '@tabler/icons-react'
-import { useAvatar } from '../components/AvatarContext'
+import { useAvatar } from '../SmallComponents/AvatarProvider'
 
-const ProfileCard = ({ setIsAuth }) => {
-  const navigate = useNavigate()
+const StudentPrCard = ({ setIsAuth }) => {
   const fileInputRef = useRef()
-
-  const role = localStorage.getItem('role') || 'student'
 
   const [user, setUser] = useState(() => {
     const savedUser = localStorage.getItem("userProfile")
@@ -37,6 +33,8 @@ const ProfileCard = ({ setIsAuth }) => {
       reader.onload = () => setAvatar(reader.result)
       reader.readAsDataURL(file)
     }
+    // Reset so selecting the same file again still triggers onChange
+    e.target.value = ''
   }
 
   const handleRemoveAvatar = () => {
@@ -45,33 +43,51 @@ const ProfileCard = ({ setIsAuth }) => {
   }
 
   const openEdit = () => {
-    setDraftName(user.fullName || '')
-    setDraftEmail(user.email || '')
+    setDraftName(user?.fullName || '')
+    setDraftEmail(user?.email || '')
     setDraftPassword('')
     setIsEditing(true)
   }
 
   const saveEdit = () => {
+    const trimmedName = draftName.trim()
+    const trimmedEmail = draftEmail.trim()
+
+    if (!trimmedName || !trimmedEmail) {
+      return
+    }
+
     const updatedUser = {
       ...user,
-      fullName: draftName,
-      email: draftEmail,
-      ...(draftPassword.trim() && { password: draftPassword })
+      fullName: trimmedName,
+      email: trimmedEmail,
+      ...(draftPassword.trim() && { password: draftPassword.trim() })
     }
     setUser(updatedUser)
     localStorage.setItem('userProfile', JSON.stringify(updatedUser))
+    localStorage.setItem('fullName', trimmedName)
+    localStorage.setItem('email', trimmedEmail)
+    if (draftPassword.trim()) {
+      localStorage.setItem('password', draftPassword.trim())
+    }
     setIsEditing(false)
   }
 
+  // FIXED: no longer wipes registration credentials (email/password/fullName/role).
+  // Only clears the current session so the same account can log back in.
   const handleLogOut = () => {
-    setIsAuth(false)
     localStorage.removeItem('auth')
-    navigate('/login', { replace: true })
+    localStorage.removeItem('userProfile')
+    localStorage.removeItem('avatar')
+    setAvatar(null)
+    setIsAuth(false)
+    window.location.href = '/login'
   }
 
   if (!user) return <p className="text-white text-center mt-10">Loading...</p>
 
-  const avatarLetter = role === 'teacher' ? user.fullName?.[0] : user.email?.[0]
+  const avatarLetter = user.fullName?.[0] || user.email?.[0] || 'S'
+  const isSaveDisabled = !draftName.trim() || !draftEmail.trim()
 
   return (
     <div className="z-10 mx-auto max-w-md w-full bg-[#14193A] rounded-2xl p-5 sm:p-8 border border-indigo-700/20 relative">
@@ -116,9 +132,9 @@ const ProfileCard = ({ setIsAuth }) => {
         <h2 className="text-white text-xl sm:text-2xl font-medium text-center break-words px-2">{user.fullName}</h2>
 
         <div className="inline-flex items-center gap-1.5 bg-indigo-500/15 border border-indigo-500/40 rounded-full px-3.5 sm:px-4 py-1.5">
-          <IconCrown size={16} className="text-indigo-300" />
+          <IconSchool size={16} className="text-indigo-300" />
           <span className="text-xs sm:text-sm font-medium text-indigo-300">
-            {role === 'teacher' ? 'Teacher' : 'Student'}
+            Student
           </span>
         </div>
 
@@ -184,13 +200,14 @@ const ProfileCard = ({ setIsAuth }) => {
           <div className="flex gap-3 mt-1">
             <button
               onClick={() => setIsEditing(false)}
-              className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
             >
               <IconX size={16} /> Cancel
             </button>
             <button
               onClick={saveEdit}
-              className="flex-1 flex items-center justify-center gap-2 bg-indigo-700 hover:bg-indigo-600 rounded-xl py-2.5 text-sm text-white transition-colors"
+              disabled={isSaveDisabled}
+              className="flex-1 flex items-center justify-center gap-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
             >
               <IconCheck size={16} /> Save
             </button>
@@ -214,13 +231,13 @@ const ProfileCard = ({ setIsAuth }) => {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors"
+                className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleLogOut}
-                className="flex-1 bg-red-700 hover:bg-red-600 rounded-xl py-2.5 text-sm text-white transition-colors"
+                className="flex-1 bg-red-700 hover:bg-red-600 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
               >
                 Yes, LogOut
               </button>
@@ -232,4 +249,4 @@ const ProfileCard = ({ setIsAuth }) => {
   )
 }
 
-export default ProfileCard
+export default StudentPrCard

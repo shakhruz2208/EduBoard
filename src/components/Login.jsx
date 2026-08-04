@@ -1,19 +1,17 @@
-import { FaEnvelope, FaLock, FaKey } from "react-icons/fa"
+import { FaEnvelope, FaLock } from "react-icons/fa"
 import { Link, useNavigate } from "react-router-dom"
 import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"
 import { useEffect, useState } from "react"
+import { toast } from "react-toastify"
 
 const Login = ({ setIsAuth, isAuth }) => {
   const navigate = useNavigate()
   const [role, setRole] = useState('student')
-  
+
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [secretCode, setSecretCode] = useState('')
   const [rememberMe, setRememberMe] = useState(false)
-
-  const TEACHER_SECRET_KEY = "MAKTEB_TECH_2026"
 
   useEffect(() => {
     const savedRemember = localStorage.getItem("rememberMe") === "true"
@@ -32,14 +30,39 @@ const Login = ({ setIsAuth, isAuth }) => {
     }
   }, [isAuth, navigate]);
 
-  const handleLogin = () => {
-    if (role === 'teacher' && secretCode !== TEACHER_SECRET_KEY) {
-      alert("Error: Secret code is incorrect");
+  const handleLogin = (e) => {
+    e.preventDefault();
+
+    const usersList = JSON.parse(localStorage.getItem('usersList')) || [];
+    const registeredEmail = localStorage.getItem('email');
+    const registeredPassword = localStorage.getItem('password');
+    const registeredFullName = localStorage.getItem('fullName');
+    const registeredRole = localStorage.getItem('role');
+
+    const foundUserInList = usersList.find(
+      (user) => user.email === email && user.password === password
+    );
+
+    const isMatchSingle = (email === registeredEmail && password === registeredPassword);
+
+    if (!foundUserInList && !isMatchSingle) {
+      toast.error("Error: Incorrect email or password, or account does not exist!");
       return;
     }
 
+    const matchedFullName = foundUserInList?.fullName || registeredFullName || '';
+    const matchedRole = foundUserInList?.role || registeredRole || role;
+
     localStorage.setItem('auth', 'true')
-    localStorage.setItem('role', role)
+    localStorage.setItem('role', matchedRole)
+
+   
+    const userData = {
+      fullName: matchedFullName,
+      email: email,
+      role: matchedRole
+    };
+    localStorage.setItem('userProfile', JSON.stringify(userData));
 
     if (rememberMe) {
       localStorage.setItem("rememberMe", "true")
@@ -51,7 +74,7 @@ const Login = ({ setIsAuth, isAuth }) => {
     }
 
     setIsAuth(true)
-    if (role === 'student') {
+    if (matchedRole === 'student') {
       navigate('/student-dashboard', { replace: true })
     } else {
       navigate('/teacher-dashboard', { replace: true })
@@ -61,13 +84,13 @@ const Login = ({ setIsAuth, isAuth }) => {
   return (
     <div className="w-full relative min-h-screen animated-bg p-3 flex flex-col items-center justify-center">
       <MatrixBg />
-    
+
       <div className="relative z-10 flex flex-col text-white gap-2 text-center pb-3">
         <h1 className="text-2xl sm:text-3xl font-bold">DevsClub.uz</h1>
         <p className="text-base sm:text-lg">A New Step Towards Knowledge</p>
       </div>
 
-      <div className="relative z-10 mx-auto bg-indigo-950 shadow-2xl shadow-indigo-800 w-full max-w-[380px] rounded-2xl p-6 pb-3">
+      <form onSubmit={handleLogin} className="relative z-10 mx-auto bg-indigo-950 shadow-2xl shadow-indigo-800 w-full max-w-[380px] rounded-2xl p-6 pb-3">
         <h1 className="text-white text-2xl sm:text-3xl font-bold pb-3">Login</h1>
         <div className="flex flex-col gap-5">
           <div>
@@ -84,6 +107,7 @@ const Login = ({ setIsAuth, isAuth }) => {
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="example@gmail.com"
                 className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-slate-900 focus:outline-none focus:border-purple-600 transition-colors"
+                required
               />
             </div>
           </div>
@@ -98,25 +122,10 @@ const Login = ({ setIsAuth, isAuth }) => {
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••"
                 className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-slate-900 focus:outline-none focus:border-purple-600 transition-colors"
+                required
               />
             </div>
           </div>
-
-          {role === "teacher" && (
-            <div className="flex flex-col gap-2">
-              <label className="text-xs font-bold text-red-400 uppercase tracking-wider">Secret Code *</label>
-              <div className="relative flex items-center">
-                <FaKey className="absolute left-4 text-red-400 text-sm" />
-                <input
-                  type="password"
-                  value={secretCode}
-                  onChange={(e) => setSecretCode(e.target.value)}
-                  placeholder="Secret Code"
-                  className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-red-900/50 focus:outline-none focus:border-red-500 transition-colors"
-                />
-              </div>
-            </div>
-          )}
 
           <div className="flex items-center gap-2 py-0.5">
             <input
@@ -133,18 +142,18 @@ const Login = ({ setIsAuth, isAuth }) => {
 
           <div className="flex flex-col gap-1">
             <button
-              onClick={handleLogin}
-              className="w-full bg-indigo-900 p-3 rounded-xl text-xl text-white cursor-pointer"
+              type="submit"
+              className="w-full bg-indigo-900 hover:bg-indigo-800 transition-colors p-3 rounded-xl text-xl text-white cursor-pointer"
             >
               Login
             </button>
-            <h1 className="text-white text-center">
-              Don't Have an account?
+            <h1 className="text-white text-center mt-2">
+              Don't Have an account?{" "}
               <Link className="text-indigo-400 underline" to='/register'>Register</Link>
             </h1>
           </div>
         </div>
-      </div>
+      </form>
     </div>
   )
 }

@@ -1,70 +1,36 @@
-import { useState, useEffect } from "react"
+import { useState } from "react"
+import { useNavigate } from "react-router-dom"
 import IconsBg from "../SmallComponents/IconsBg"
 import { MdAssignment, MdPendingActions } from "react-icons/md"
 import { BiSend, BiCalendar } from "react-icons/bi"
 import { BsPeople } from "react-icons/bs"
 import { IoCreate, IoChevronForward } from "react-icons/io5"
 import { FiTrash2 } from "react-icons/fi"
-import axios from "axios"
-import { toast } from "react-toastify"
 import { CgSpinner } from "react-icons/cg"
+import { useAssignments } from "../SmallComponents/AssignmentProvider"
 
 const TeacherDashboard = () => {
+  const { assignmentsList, loading, addAssignment, deleteAssignment } = useAssignments()
+  const navigate = useNavigate()
+
   const [assignment, setAssignment] = useState('')
   const [deadline, setDeadline] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [assignmentsList, setAssignmentsList] = useState([])
   const [showAll, setShowAll] = useState(false)
 
-  useEffect(() => {
-    fetchAssignments()
-  }, [])
-
-  const handleDelete = async (id) => {
-    try {
-      setLoading(true)
-      await axios.delete(`https://6a61aaafda10c59c1809b130.mockapi.io/assignment/${id}`)
-      setAssignmentsList((prev) => prev.filter((item) => item.id !== id))
-      toast.success('Successfully Deleted')
-    } catch (error) {
-      toast.error('Error when Deleting')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const fetchAssignments = async () => {
-    try {
-      setLoading(true)
-      const res = await axios.get('https://6a61aaafda10c59c1809b130.mockapi.io/assignment')
-      setAssignmentsList(res.data)
-    } catch (error) {
-      console.error("Ma'lumotlarni olishda xatolik", error)
-    } finally {
-      setLoading(false)
-    }
-  }
-  
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!assignment.trim()) return
-
-    const newData = {
-      assignment: assignment,
-      deadline: deadline
+    let teacherName = "Unknown Teacher"
+    try {
+      const savedProfile = JSON.parse(localStorage.getItem('userProfile'))
+      teacherName = savedProfile?.fullName || teacherName
+    } catch {
+      // keep fallback
     }
 
-    try {
-      setLoading(true)
-      const res = await axios.post('https://6a61aaafda10c59c1809b130.mockapi.io/assignment', newData)
-      setAssignmentsList((prev) => [...prev, res.data])
+    const success = await addAssignment(assignment, deadline, teacherName)
+    if (success) {
       setAssignment('')
       setDeadline('')
-      toast.success('Successfully Uploaded')
-    } catch (error) {
-      toast.error('Error when uploading')      
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -85,7 +51,7 @@ const TeacherDashboard = () => {
               <MdAssignment className="text-indigo-400 text-3xl" />
               <h1 className="text-indigo-400 text-sm font-serif">Total</h1>
             </div>
-            <h1 className="text-4xl text-white pt-3">12</h1>
+            <h1 className="text-4xl text-white pt-3">{assignmentsList.length}</h1>
             <h1 className="text-indigo-400 text-sm pt-2 font-bold">Submitted assignments</h1>
           </div>
 
@@ -109,7 +75,7 @@ const TeacherDashboard = () => {
         </div>
 
         <div className="flex flex-col xl:flex-row gap-10 mt-10 items-start">
-          
+
           <form onSubmit={handleSubmit} className="bg-[#08133d] rounded-2xl p-8 flex flex-col gap-6 w-full xl:w-[400px] shrink-0">
             <div className="text-white flex gap-2 items-center">
               <IoCreate className="text-3xl"/>
@@ -131,6 +97,7 @@ const TeacherDashboard = () => {
               <label htmlFor="deadline">Deadline</label>
               <input
                 value={deadline}
+                required
                 onChange={(e)=>setDeadline(e.target.value)}
                 className="rounded-xl p-3 w-full outline-none focus:shadow-md transition-all duration-150 ease-in-out focus:shadow-blue-800 bg-[#090b79] [&::-webkit-calendar-picker-indicator]:invert" 
                 type="date" 
@@ -164,7 +131,8 @@ const TeacherDashboard = () => {
                   {displayedAssignments.map((item, index) => (
                     <div 
                       key={item.id} 
-                      className="relative bg-[#08133d] border border-indigo-900/50 p-6 rounded-2xl flex items-center justify-between shadow-xl shrink-0 overflow-hidden hover:border-indigo-500/50 transition-all">
+                      onClick={() => navigate(`/teacher-assignment/${item.id}`)}
+                      className="relative bg-[#08133d] border border-indigo-900/50 p-6 rounded-2xl flex items-center justify-between shadow-xl shrink-0 overflow-hidden hover:border-indigo-500/50 transition-all cursor-pointer">
                       
                       <div className={`absolute left-0 top-0 bottom-0 w-2 ${index % 2 === 0 ? 'bg-gradient-to-b from-blue-500 to-indigo-600' : 'bg-gradient-to-b from-purple-500 to-pink-600'}`} />
 
@@ -178,24 +146,29 @@ const TeacherDashboard = () => {
 
                       <div className="flex items-center gap-6">
                         <div className="flex flex-col items-end">
-                          <span className="text-[10px] tracking-wider text-indigo-400 font-semibold">SUBMITTED</span>
-                          <div className="flex items-center gap-2 text-white font-bold">
-                            <span>0 / 24</span>
-                            <div className="w-12 h-1.5 bg-indigo-950 rounded-full overflow-hidden">
-                              <div className="w-0 h-full bg-green-500"></div>
-                            </div>
-                          </div>
+                          <span className="text-[10px] tracking-wider text-indigo-400 font-semibold">SUBMISSIONS</span>
+                          <span className="text-white font-bold">
+                            {Array.isArray(item.submissions) ? item.submissions.length : 0}
+                          </span>
                         </div>
 
                         <div className="flex items-center gap-2">
                           <button 
-                            onClick={() => handleDelete(item.id)}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              deleteAssignment(item.id)
+                            }}
                             className="w-10 h-10 rounded-xl bg-red-950/40 hover:bg-red-600 transition-all flex items-center justify-center text-red-400 hover:text-white shadow-md cursor-pointer"
                             title="Delete assignment">
                             <FiTrash2 className="text-lg" />
                           </button>
 
-                          <button className="w-10 h-10 rounded-xl bg-[#0e1b52] hover:bg-indigo-600 transition-all flex items-center justify-center text-white shadow-md cursor-pointer">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              navigate(`/teacher-assignment/${item.id}`)
+                            }}
+                            className="w-10 h-10 rounded-xl bg-[#0e1b52] hover:bg-indigo-600 transition-all flex items-center justify-center text-white shadow-md cursor-pointer">
                             <IoChevronForward className="text-lg" />
                           </button>
                         </div>

@@ -12,7 +12,7 @@ const AvatarCircle = ({ avatar, avatarLetter, role }) => (
         {avatar ? (
             <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
         ) : (
-            <span className="text-white text-sm font-bold">{avatarLetter}</span>
+            <span className="text-white text-xl pb-1 font-bold">{avatarLetter}</span>
         )}
     </NavLink>
 )

@@ -4,6 +4,8 @@ import ProtectedRoute from './components/ProtectedRoute';
 import TeacherProfile from './TeacherComponents/TeacherProfile';
 import StudentProfile from './StudentComponents/StudentProfile';
 import { AvatarProvider } from './components/AvatarContext';
+import AssignmentDetail from './SmallComponents/AssignmentDetail';
+import TeacherAssignmentDetail from './SmallComponents/TeacherAssignmentDetail';
 
 const Register = lazy(() => import('./components/Register'));
 const Login = lazy(() => import('./components/Login'));
@@ -32,7 +34,8 @@ const App = () => {
               <Route path='/student-dashboard' element={<StudentDashboard setIsAuth={setIsAuth} />} />
               <Route path='/students-rating' element={<StudentRating setIsAuth={setIsAuth} />} />
               <Route path='/teacher-students' element={<TeacherStudents setIsAuth={setIsAuth} />} />
-              
+              <Route path="/assignment/:id" element={<AssignmentDetail />} />
+              <Route path="/teacher-assignment/:id" element={<TeacherAssignmentDetail />} />
             </Route >
             <Route path='*' element={<Navigate to='/' replace />} />
           </Routes>
