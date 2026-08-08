@@ -1,23 +1,27 @@
 import { FaEnvelope, FaLock, FaUser, FaKey } from "react-icons/fa"
+import { HiOutlineAcademicCap } from "react-icons/hi2"
 import { Link, useNavigate } from "react-router-dom"
 import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"
 import { useEffect, useState } from "react"
-import { toast } from "react-toastify"
+import { useAuth } from "../Providers/AuthProvider"
+import { useCourses } from "../Providers/CourseProvider"
 
-const Register = ({ setIsAuth, isAuth }) => {
+const Register = () => {
   const navigate = useNavigate();
+  const { registerStudent, registerTeacher, isAuth, user, authLoading } = useAuth()
+  const { courses, enrollStudent } = useCourses()
 
   const [registerData, setRegisterData] = useState({
     fullName: "",
     email: "",
     password: "",
     role: "student",
-    secretCode: ""
+    secretCode: "",
+    courseId: ""
   });
 
-  const [rememberMe, setRememberMe] = useState(false);
-  const TEACHER_SECRET_KEY = "MAKTEB_TECH_2026";
+  const [submitting, setSubmitting] = useState(false)
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -28,72 +32,33 @@ const Register = ({ setIsAuth, isAuth }) => {
     setRegisterData((prev) => ({ ...prev, role: selectedRole }));
   };
 
-  const handleRegister = (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
+    setSubmitting(true)
 
-    const existingEmail = localStorage.getItem("email");
-    if (existingEmail && existingEmail === registerData.email) {
-      toast.error("Error: This email is already registered. Please login!");
-      return;
+    if (registerData.role === 'teacher') {
+      const success = await registerTeacher(registerData.fullName, registerData.email, registerData.password, registerData.secretCode)
+      setSubmitting(false)
+      if (success) navigate('/teacher-dashboard', { replace: true })
+      return
     }
 
-    if (registerData.role === 'teacher' && registerData.secretCode !== TEACHER_SECRET_KEY) {
-      toast.error("Error: Secret code is incorrect");
-      return;
+    const success = await registerStudent(registerData.fullName, registerData.email, registerData.password)
+
+    if (success && registerData.courseId) {
+      const selectedCourse = courses.find((c) => String(c.id) === String(registerData.courseId))
+      await enrollStudent(registerData.email, registerData.fullName, registerData.courseId, selectedCourse?.name)
     }
 
-    localStorage.setItem("fullName", registerData.fullName);
-    localStorage.setItem("email", registerData.email);
-    localStorage.setItem("password", registerData.password);
-    localStorage.setItem("role", registerData.role);
-    localStorage.setItem("auth", "true");
-
-    const userData = {
-      fullName: registerData.fullName,
-      email: registerData.email,
-      role: registerData.role
-    };
-    localStorage.setItem("userProfile", JSON.stringify(userData));
-
-    if (rememberMe) {
-      localStorage.setItem("rememberMe", "true");
-      localStorage.setItem("savedFullName", registerData.fullName);
-      localStorage.setItem("savedEmail", registerData.email);
-    } else {
-      localStorage.removeItem("rememberMe");
-      localStorage.removeItem("savedFullName");
-      localStorage.removeItem("savedEmail");
-    }
-
-    setIsAuth(true);
-
-    if (registerData.role === "teacher") {
-      navigate("/teacher-dashboard", { replace: true });
-    } else {
-      navigate("/student-dashboard", { replace: true });
-    }
+    setSubmitting(false)
+    if (success) navigate('/student-dashboard', { replace: true })
   };
 
   useEffect(() => {
-    const savedRemember = localStorage.getItem("rememberMe") === "true";
-    if (savedRemember) {
-      setRememberMe(true);
-      setRegisterData(prev => ({
-        ...prev,
-        fullName: localStorage.getItem("savedFullName") || "",
-        email: localStorage.getItem("savedEmail") || ""
-      }));
+    if (!authLoading && isAuth && user) {
+      navigate(user.teacher ? '/teacher-dashboard' : '/student-dashboard', { replace: true });
     }
-
-    if (isAuth) {
-      const savedRole = localStorage.getItem('role');
-      if (savedRole === 'student') {
-        navigate('/student-dashboard', { replace: true });
-      } else if (savedRole === 'teacher') {
-        navigate('/teacher-dashboard', { replace: true });
-      }
-    }
-  }, [isAuth, navigate]);
+  }, [authLoading, isAuth, user, navigate]);
 
   return (
     <div className="w-full relative min-h-screen animated-bg p-4 flex flex-col items-center justify-center">
@@ -123,6 +88,8 @@ const Register = ({ setIsAuth, isAuth }) => {
                   value={registerData.fullName}
                   onChange={handleChange}
                   placeholder="Anvar Alimov"
+                  minLength={3}
+                  maxLength={50}
                   className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-slate-900 focus:outline-none focus:border-purple-600 transition-colors"
                   required
                 />
@@ -155,15 +122,18 @@ const Register = ({ setIsAuth, isAuth }) => {
                   value={registerData.password}
                   onChange={handleChange}
                   placeholder="••••••••"
+                  minLength={8}
+                  maxLength={128}
                   className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-slate-900 focus:outline-none focus:border-purple-600 transition-colors"
                   required
                 />
               </div>
+              <p className="text-[11px] text-slate-500">At least 8 characters</p>
             </div>
 
-            {registerData.role === "teacher" && (
+            {registerData.role === "teacher" ? (
               <div className="flex flex-col gap-2">
-                <label className="text-xs font-bold text-red-400 uppercase tracking-wider">Secret Code *</label>
+                <label className="text-xs font-bold text-red-400 uppercase tracking-wider">Secret Code</label>
                 <div className="relative flex items-center">
                   <FaKey className="absolute left-4 text-red-400 text-sm" />
                   <input
@@ -173,31 +143,41 @@ const Register = ({ setIsAuth, isAuth }) => {
                     onChange={handleChange}
                     placeholder="Secret Code"
                     className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-red-900/50 focus:outline-none focus:border-red-500 transition-colors"
-                    required
                   />
                 </div>
               </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Course / Group</label>
+                <div className="relative flex items-center">
+                  <HiOutlineAcademicCap className="absolute left-4 text-slate-500 text-base pointer-events-none" />
+                  <select
+                    name="courseId"
+                    value={registerData.courseId}
+                    onChange={handleChange}
+                    className="w-full appearance-none bg-[#030712] text-slate-300 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-slate-900 focus:outline-none focus:border-purple-600 transition-colors cursor-pointer"
+                  >
+                    <option value="">No course selected</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.name} — {course.teacherName}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {courses.length === 0 && (
+                  <p className="text-[11px] text-slate-500">No courses yet — your teacher hasn't created one, you can register without picking one.</p>
+                )}
+              </div>
             )}
-
-            <div className="flex items-center gap-2 py-0.5">
-              <input
-                type="checkbox"
-                id="remember"
-                checked={rememberMe}
-                onChange={(e) => setRememberMe(e.target.checked)}
-                className="w-4 h-4 rounded bg-[#030712] border-slate-900 text-purple-600 focus:ring-purple-600 cursor-pointer"
-              />
-              <label htmlFor="remember" className="text-xs font-medium text-slate-400 cursor-pointer select-none">
-                Remember me
-              </label>
-            </div>
 
             <div className="flex flex-col gap-1 mt-2">
               <button
                 type="submit"
-                className="w-full bg-indigo-900 hover:bg-indigo-800 transition-colors p-3.5 rounded-xl text-lg text-white cursor-pointer font-bold tracking-wide shadow-lg shadow-indigo-950"
+                disabled={submitting}
+                className="w-full bg-indigo-900 hover:bg-indigo-800 transition-colors p-3.5 rounded-xl text-lg text-white cursor-pointer font-bold tracking-wide shadow-lg shadow-indigo-950 disabled:opacity-50 disabled:cursor-not-allowed"
               >
-                Register
+                {submitting ? "Registering..." : "Register"}
               </button>
               <h1 className="text-slate-400 text-center text-sm mt-3">
                 Have an account?{" "}

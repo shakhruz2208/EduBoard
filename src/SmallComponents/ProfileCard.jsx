@@ -1,77 +1,64 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   IconPencil, IconCrown, IconMail,
-  IconLock, IconLogout, IconX, IconCheck,
-  IconTrash
+  IconLock, IconLogout, IconX, IconCheck
 } from '@tabler/icons-react'
-import { useAvatar } from '../components/AvatarContext'
+import { CgSpinner } from 'react-icons/cg'
+import { useAuth, resolveAvatarUrl } from '../Providers/AuthProvider'
 
-const ProfileCard = ({ setIsAuth }) => {
+const ProfileCard = () => {
   const navigate = useNavigate()
   const fileInputRef = useRef()
+  const { user, logout, uploadAvatar, avatarUploading } = useAuth()
 
-  const role = localStorage.getItem('role') || 'student'
+  const role = user?.teacher ? 'teacher' : 'student'
 
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("userProfile")
-    return savedUser ? JSON.parse(savedUser) : null
-  })
-
-  const { avatar, setAvatar } = useAvatar()
   const [isEditing, setIsEditing] = useState(false)
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false)
 
   const [draftName, setDraftName] = useState('')
   const [draftEmail, setDraftEmail] = useState('')
-  const [draftPassword, setDraftPassword] = useState('')
+
+  useEffect(() => {
+    if (user) {
+      setDraftName(user.full_name || '')
+      setDraftEmail(user.email || '')
+    }
+  }, [user])
 
   const handleAvatarClick = () => {
     fileInputRef.current.click()
   }
 
-  const handleAvatarChange = (e) => {
+  const handleAvatarChange = async (e) => {
     const file = e.target.files[0]
     if (file) {
-      const reader = new FileReader()
-      reader.onload = () => setAvatar(reader.result)
-      reader.readAsDataURL(file)
+      await uploadAvatar(file)
     }
-  }
-
-  const handleRemoveAvatar = () => {
-    setAvatar(null)
-    localStorage.removeItem('avatar')
+    e.target.value = ''
   }
 
   const openEdit = () => {
-    setDraftName(user.fullName || '')
-    setDraftEmail(user.email || '')
-    setDraftPassword('')
+    setDraftName(user?.full_name || '')
+    setDraftEmail(user?.email || '')
     setIsEditing(true)
   }
 
+
   const saveEdit = () => {
-    const updatedUser = {
-      ...user,
-      fullName: draftName,
-      email: draftEmail,
-      ...(draftPassword.trim() && { password: draftPassword })
-    }
-    setUser(updatedUser)
-    localStorage.setItem('userProfile', JSON.stringify(updatedUser))
     setIsEditing(false)
   }
 
   const handleLogOut = () => {
-    setIsAuth(false)
-    localStorage.removeItem('auth')
-    navigate('/login', { replace: true })
+    logout()
   }
 
   if (!user) return <p className="text-white text-center mt-10">Loading...</p>
 
-  const avatarLetter = role === 'teacher' ? user.fullName?.[0] : user.email?.[0]
+  const avatarUrl = resolveAvatarUrl(user.profile_pic)
+  const avatarLetter = user.full_name?.[0] || user.email?.[0] || (role === 'teacher' ? 'T' : 'S')
+  const isSaveDisabled = !draftName.trim() || !draftEmail.trim()
 
   return (
     <div className="z-10 mx-auto max-w-md w-full bg-[#14193A] rounded-2xl p-5 sm:p-8 border border-indigo-700/20 relative">
@@ -87,8 +74,8 @@ const ProfileCard = ({ setIsAuth }) => {
       <div className="flex flex-col items-center gap-3">
         <div className="relative w-24 h-24 sm:w-28 sm:h-28">
           <div className="w-full h-full rounded-full bg-gradient-to-br from-indigo-700 to-purple-700 flex items-center justify-center overflow-hidden">
-            {avatar ? (
-              <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
             ) : (
               <span className="text-white text-3xl sm:text-4xl font-bold">{avatarLetter}</span>
             )}
@@ -96,24 +83,21 @@ const ProfileCard = ({ setIsAuth }) => {
 
           <button
             onClick={handleAvatarClick}
-            className="absolute bottom-0 right-0 w-8 h-8 sm:w-9 sm:h-9 bg-indigo-700 rounded-full flex items-center justify-center border-2 border-[#14193A] cursor-pointer hover:bg-indigo-600 transition-colors"
+            disabled={avatarUploading}
+            className="absolute bottom-0 right-0 w-8 h-8 sm:w-9 sm:h-9 bg-indigo-700 rounded-full flex items-center justify-center border-2 border-[#14193A] cursor-pointer hover:bg-indigo-600 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <IconPencil size={14} className="text-white sm:hidden" />
-            <IconPencil size={16} className="text-white hidden sm:block" />
+            {avatarUploading ? (
+              <CgSpinner className="animate-spin text-white text-sm" />
+            ) : (
+              <>
+                <IconPencil size={14} className="text-white sm:hidden" />
+                <IconPencil size={16} className="text-white hidden sm:block" />
+              </>
+            )}
           </button>
-
-          {avatar && (
-            <button
-              onClick={handleRemoveAvatar}
-              className="absolute top-0 right-0 w-6 h-6 sm:w-7 sm:h-7 bg-red-700 rounded-full flex items-center justify-center border-2 border-[#14193A] cursor-pointer hover:bg-red-600 transition-colors"
-            >
-              <IconTrash size={11} className="text-white sm:hidden" />
-              <IconTrash size={13} className="text-white hidden sm:block" />
-            </button>
-          )}
         </div>
 
-        <h2 className="text-white text-xl sm:text-2xl font-medium text-center break-words px-2">{user.fullName}</h2>
+        <h2 className="text-white text-xl sm:text-2xl font-medium text-center break-words px-2">{user.full_name}</h2>
 
         <div className="inline-flex items-center gap-1.5 bg-indigo-500/15 border border-indigo-500/40 rounded-full px-3.5 sm:px-4 py-1.5">
           <IconCrown size={16} className="text-indigo-300" />
@@ -150,6 +134,9 @@ const ProfileCard = ({ setIsAuth }) => {
         </div>
       ) : (
         <div className="mt-6 sm:mt-7 flex flex-col gap-3 sm:gap-4">
+          <p className="text-amber-400 text-xs bg-amber-500/10 border border-amber-700/30 rounded-lg px-3 py-2">
+            Profile editing isn't connected to the backend yet — this needs a PATCH /me endpoint on the API.
+          </p>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">FullName</label>
             <input
@@ -170,27 +157,17 @@ const ProfileCard = ({ setIsAuth }) => {
             />
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">New password</label>
-            <input
-              type="password"
-              placeholder="Leave blank if you don't change it."
-              value={draftPassword}
-              onChange={(e) => setDraftPassword(e.target.value)}
-              className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm px-4 py-2.5 sm:py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-indigo-600"
-            />
-          </div>
-
           <div className="flex gap-3 mt-1">
             <button
               onClick={() => setIsEditing(false)}
-              className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors"
+              className="flex-1 flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
             >
               <IconX size={16} /> Cancel
             </button>
             <button
               onClick={saveEdit}
-              className="flex-1 flex items-center justify-center gap-2 bg-indigo-700 hover:bg-indigo-600 rounded-xl py-2.5 text-sm text-white transition-colors"
+              disabled={isSaveDisabled}
+              className="flex-1 flex items-center justify-center gap-2 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
             >
               <IconCheck size={16} /> Save
             </button>
@@ -214,13 +191,13 @@ const ProfileCard = ({ setIsAuth }) => {
             <div className="flex gap-3">
               <button
                 onClick={() => setShowLogoutConfirm(false)}
-                className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors"
+                className="flex-1 bg-slate-800 hover:bg-slate-700 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 onClick={handleLogOut}
-                className="flex-1 bg-red-700 hover:bg-red-600 rounded-xl py-2.5 text-sm text-white transition-colors"
+                className="flex-1 bg-red-700 hover:bg-red-600 rounded-xl py-2.5 text-sm text-white transition-colors cursor-pointer"
               >
                 Yes, LogOut
               </button>

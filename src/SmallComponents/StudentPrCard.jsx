@@ -1,18 +1,15 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import {
   IconPencil, IconSchool, IconMail,
   IconLock, IconLogout, IconX, IconCheck,
   IconTrash
 } from '@tabler/icons-react'
-import { useAvatar } from '../SmallComponents/AvatarProvider'
+import { useAvatar } from '../Providers/AvatarProvider'
+import { useAuth } from '../Providers/AuthProvider'
 
-const StudentPrCard = ({ setIsAuth }) => {
+const StudentPrCard = () => {
   const fileInputRef = useRef()
-
-  const [user, setUser] = useState(() => {
-    const savedUser = localStorage.getItem("userProfile")
-    return savedUser ? JSON.parse(savedUser) : null
-  })
+  const { user, logout } = useAuth()
 
   const { avatar, setAvatar } = useAvatar()
   const [isEditing, setIsEditing] = useState(false)
@@ -20,7 +17,13 @@ const StudentPrCard = ({ setIsAuth }) => {
 
   const [draftName, setDraftName] = useState('')
   const [draftEmail, setDraftEmail] = useState('')
-  const [draftPassword, setDraftPassword] = useState('')
+
+  useEffect(() => {
+    if (user) {
+      setDraftName(user.full_name || '')
+      setDraftEmail(user.email || '')
+    }
+  }, [user])
 
   const handleAvatarClick = () => {
     fileInputRef.current.click()
@@ -33,7 +36,6 @@ const StudentPrCard = ({ setIsAuth }) => {
       reader.onload = () => setAvatar(reader.result)
       reader.readAsDataURL(file)
     }
-    // Reset so selecting the same file again still triggers onChange
     e.target.value = ''
   }
 
@@ -43,50 +45,24 @@ const StudentPrCard = ({ setIsAuth }) => {
   }
 
   const openEdit = () => {
-    setDraftName(user?.fullName || '')
+    setDraftName(user?.full_name || '')
     setDraftEmail(user?.email || '')
-    setDraftPassword('')
     setIsEditing(true)
   }
 
+
   const saveEdit = () => {
-    const trimmedName = draftName.trim()
-    const trimmedEmail = draftEmail.trim()
-
-    if (!trimmedName || !trimmedEmail) {
-      return
-    }
-
-    const updatedUser = {
-      ...user,
-      fullName: trimmedName,
-      email: trimmedEmail,
-      ...(draftPassword.trim() && { password: draftPassword.trim() })
-    }
-    setUser(updatedUser)
-    localStorage.setItem('userProfile', JSON.stringify(updatedUser))
-    localStorage.setItem('fullName', trimmedName)
-    localStorage.setItem('email', trimmedEmail)
-    if (draftPassword.trim()) {
-      localStorage.setItem('password', draftPassword.trim())
-    }
     setIsEditing(false)
   }
 
-  // FIXED: no longer wipes registration credentials (email/password/fullName/role).
-  // Only clears the current session so the same account can log back in.
   const handleLogOut = () => {
-    localStorage.removeItem('auth')
-    localStorage.removeItem('userProfile')
-    localStorage.removeItem('avatar')
-    setAvatar(null)
-    setIsAuth(false)
-    window.location.href = '/login'
+    logout()
+
   }
 
   if (!user) return <p className="text-white text-center mt-10">Loading...</p>
 
-  const avatarLetter = user.fullName?.[0] || user.email?.[0] || 'S'
+  const avatarLetter = user.full_name?.[0] || user.email?.[0] || 'S'
   const isSaveDisabled = !draftName.trim() || !draftEmail.trim()
 
   return (
@@ -106,7 +82,7 @@ const StudentPrCard = ({ setIsAuth }) => {
             {avatar ? (
               <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
             ) : (
-              <span className="text-white text-3xl sm:text-4xl font-bold">{avatarLetter}</span>
+              <span className="text-white text-3xl sm:text-4xl uppercase font-bold">{avatarLetter}</span>
             )}
           </div>
 
@@ -129,7 +105,7 @@ const StudentPrCard = ({ setIsAuth }) => {
           )}
         </div>
 
-        <h2 className="text-white text-xl sm:text-2xl font-medium text-center break-words px-2">{user.fullName}</h2>
+        <h2 className="text-white text-xl sm:text-2xl font-medium text-center break-words px-2">{user.full_name}</h2>
 
         <div className="inline-flex items-center gap-1.5 bg-indigo-500/15 border border-indigo-500/40 rounded-full px-3.5 sm:px-4 py-1.5">
           <IconSchool size={16} className="text-indigo-300" />
@@ -166,6 +142,9 @@ const StudentPrCard = ({ setIsAuth }) => {
         </div>
       ) : (
         <div className="mt-6 sm:mt-7 flex flex-col gap-3 sm:gap-4">
+          <p className="text-amber-400 text-xs bg-amber-500/10 border border-amber-700/30 rounded-lg px-3 py-2">
+            Profile editing isn't connected to the backend yet — this needs a PATCH /me endpoint on the API.
+          </p>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">FullName</label>
             <input
@@ -183,17 +162,6 @@ const StudentPrCard = ({ setIsAuth }) => {
               value={draftEmail}
               onChange={(e) => setDraftEmail(e.target.value)}
               className="w-full bg-[#030712] text-slate-300 text-sm px-4 py-2.5 sm:py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-indigo-600"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">New password</label>
-            <input
-              type="password"
-              placeholder="Leave blank if you don't change it."
-              value={draftPassword}
-              onChange={(e) => setDraftPassword(e.target.value)}
-              className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm px-4 py-2.5 sm:py-3 rounded-xl border border-slate-800 focus:outline-none focus:border-indigo-600"
             />
           </div>
 

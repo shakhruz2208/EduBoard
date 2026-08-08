@@ -1,84 +1,38 @@
 import { FaEnvelope, FaLock } from "react-icons/fa"
 import { Link, useNavigate } from "react-router-dom"
-import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"
 import { useEffect, useState } from "react"
-import { toast } from "react-toastify"
+import { useAuth } from "../Providers/AuthProvider"
 
-const Login = ({ setIsAuth, isAuth }) => {
+const Login = () => {
   const navigate = useNavigate()
-  const [role, setRole] = useState('student')
+  const { login, isAuth, user, authLoading } = useAuth()
 
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [rememberMe, setRememberMe] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [slowHint, setSlowHint] = useState(false)
 
   useEffect(() => {
-    const savedRemember = localStorage.getItem("rememberMe") === "true"
-    if (savedRemember) {
-      setRememberMe(true)
-      setEmail(localStorage.getItem("savedEmail") || "")
+    if (!authLoading && isAuth && user) {
+      navigate(user.teacher ? '/teacher-dashboard' : '/student-dashboard', { replace: true });
     }
+  }, [authLoading, isAuth, user, navigate]);
 
-    if (isAuth) {
-      const savedRole = localStorage.getItem('role')
-      if (savedRole === 'student') {
-        navigate('/student-dashboard', { replace: true });
-      } else if (savedRole === 'teacher') {
-        navigate('/teacher-dashboard', { replace: true });
-      }
-    }
-  }, [isAuth, navigate]);
-
-  const handleLogin = (e) => {
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setSubmitting(true)
+    setSlowHint(false)
 
-    const usersList = JSON.parse(localStorage.getItem('usersList')) || [];
-    const registeredEmail = localStorage.getItem('email');
-    const registeredPassword = localStorage.getItem('password');
-    const registeredFullName = localStorage.getItem('fullName');
-    const registeredRole = localStorage.getItem('role');
 
-    const foundUserInList = usersList.find(
-      (user) => user.email === email && user.password === password
-    );
+    const slowTimer = setTimeout(() => setSlowHint(true), 4000)
 
-    const isMatchSingle = (email === registeredEmail && password === registeredPassword);
+    await login(email, password)
 
-    if (!foundUserInList && !isMatchSingle) {
-      toast.error("Error: Incorrect email or password, or account does not exist!");
-      return;
-    }
+    clearTimeout(slowTimer)
+    setSlowHint(false)
+    setSubmitting(false)
 
-    const matchedFullName = foundUserInList?.fullName || registeredFullName || '';
-    const matchedRole = foundUserInList?.role || registeredRole || role;
-
-    localStorage.setItem('auth', 'true')
-    localStorage.setItem('role', matchedRole)
-
-   
-    const userData = {
-      fullName: matchedFullName,
-      email: email,
-      role: matchedRole
-    };
-    localStorage.setItem('userProfile', JSON.stringify(userData));
-
-    if (rememberMe) {
-      localStorage.setItem("rememberMe", "true")
-      localStorage.setItem("savedEmail", email)
-    } else {
-      localStorage.removeItem("rememberMe")
-      localStorage.removeItem("savedFullName")
-      localStorage.removeItem("savedEmail")
-    }
-
-    setIsAuth(true)
-    if (matchedRole === 'student') {
-      navigate('/student-dashboard', { replace: true })
-    } else {
-      navigate('/teacher-dashboard', { replace: true })
-    }
   }
 
   return (
@@ -93,9 +47,6 @@ const Login = ({ setIsAuth, isAuth }) => {
       <form onSubmit={handleLogin} className="relative z-10 mx-auto bg-indigo-950 shadow-2xl shadow-indigo-800 w-full max-w-[380px] rounded-2xl p-6 pb-3">
         <h1 className="text-white text-2xl sm:text-3xl font-bold pb-3">Login</h1>
         <div className="flex flex-col gap-5">
-          <div>
-            <RoleToggle activeRole={role} onChange={setRole} />
-          </div>
 
           <div className="flex flex-col gap-2">
             <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email</label>
@@ -127,26 +78,19 @@ const Login = ({ setIsAuth, isAuth }) => {
             </div>
           </div>
 
-          <div className="flex items-center gap-2 py-0.5">
-            <input
-              type="checkbox"
-              id="remember"
-              checked={rememberMe}
-              onChange={(e) => setRememberMe(e.target.checked)}
-              className="w-4 h-4 rounded bg-[#030712] border-slate-900 text-purple-600 focus:ring-purple-600 cursor-pointer"
-            />
-            <label htmlFor="remember" className="text-xs font-medium text-slate-400 cursor-pointer select-none">
-              Remember me
-            </label>
-          </div>
-
           <div className="flex flex-col gap-1">
             <button
               type="submit"
-              className="w-full bg-indigo-900 hover:bg-indigo-800 transition-colors p-3 rounded-xl text-xl text-white cursor-pointer"
+              disabled={submitting}
+              className="w-full bg-indigo-900 hover:bg-indigo-800 transition-colors p-3 rounded-xl text-xl text-white cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              Login
+              {submitting ? "Logging in..." : "Login"}
             </button>
+            {slowHint && (
+              <p className="text-amber-400 text-xs text-center mt-1">
+                Waking up the server, this can take up to a minute on the first request...
+              </p>
+            )}
             <h1 className="text-white text-center mt-2">
               Don't Have an account?{" "}
               <Link className="text-indigo-400 underline" to='/register'>Register</Link>
