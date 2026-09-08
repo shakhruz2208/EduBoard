@@ -1,135 +1,154 @@
-import { createContext, useContext, useMemo, useCallback, useState, useEffect } from "react"
-import { useAssignments } from "../Providers/AssignmentProvider"
-import { useAuth } from "../Providers/AuthProvider"
+import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import api from "../api"
+import { useAuth } from "./AuthProvider"
 
 const NotificationContext = createContext(null)
 
-const isGradedValue = (grade) => grade !== undefined && grade !== null && grade !== ""
-
-const daysUntil = (deadlineStr) => {
-  if (!deadlineStr) return null
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const deadlineDate = new Date(deadlineStr)
-  deadlineDate.setHours(0, 0, 0, 0)
-  return Math.round((deadlineDate - today) / (1000 * 60 * 60 * 24))
-}
-
 export const NotificationProvider = ({ children }) => {
-  const { assignmentsList } = useAssignments()
-  const { user } = useAuth()
+  const { isAuth } = useAuth()
+  const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [fetching, setFetching] = useState(false)
 
-  const [seenIds, setSeenIds] = useState(() => new Set())
+  const fetchNotifications = useCallback(async () => {
+    try {
+      const res = await api.get('/notifications', { params: { skip: 0, limit: 50 } })
+      const data = res.data
+      if (Array.isArray(data)) setNotifications(data)
+      else if (Array.isArray(data?.items)) setNotifications(data.items)
+      else { console.error("Unrecognized GET /notifications shape:", data); setNotifications([]) }
+    } catch (error) {
+      console.error("Error fetching notifications", error)
+    }
+  }, [])
+
+  const fetchUnreadCount = useCallback(async () => {
+    try {
+      const res = await api.get('/notifications/unread-count')
+      const data = res.data
+      const count = typeof data === 'number' ? data : (data?.count ?? data?.unread_count ?? 0)
+      setUnreadCount(count)
+    } catch (error) {
+      console.error("Error fetching unread count", error)
+    }
+  }, [])
+
+  const fetchAll = useCallback(async () => {
+    try {
+      setFetching(true)
+      await Promise.all([fetchNotifications(), fetchUnreadCount()])
+    } finally {
+      setFetching(false)
+    }
+  }, [fetchNotifications, fetchUnreadCount])
 
   useEffect(() => {
-    if (!user) {
-      setSeenIds(new Set())
-      return
-    }
-    try {
-      const stored = localStorage.getItem(`notifications_seen:${user.id}`)
-      setSeenIds(new Set(stored ? JSON.parse(stored) : []))
-    } catch {
-      setSeenIds(new Set())
-    }
-  }, [user])
-
-  const persistSeen = useCallback((nextSet) => {
-    if (!user) return
-    localStorage.setItem(`notifications_seen:${user.id}`, JSON.stringify([...nextSet]))
-  }, [user])
-
-  // Build the live notification list from current assignment data.
-  // Nothing is stored server-side — everything is derived on the fly each render.
-  const notifications = useMemo(() => {
-    if (!user) return []
-    const isTeacher = Boolean(user.teacher)
-    const list = []
-
-    if (isTeacher) {
-      const myAssignments = assignmentsList.filter((a) => a.teacherName === user.full_name)
-
-      myAssignments.forEach((a) => {
-        const submissions = Array.isArray(a.submissions) ? a.submissions : []
-        submissions.forEach((sub) => {
-          if (!isGradedValue(sub.grade)) {
-            list.push({
-              id: `submission:${a.id}:${sub.studentName}:${sub.submittedAt}`,
-              type: "submission",
-              message: `${sub.studentName} submitted "${a.assignment}" — needs grading`,
-              link: `/teacher-assignment/${a.id}`,
-              timestamp: sub.submittedAt
-            })
-          }
-        })
-      })
+    if (isAuth) {
+      fetchAll()
     } else {
-      assignmentsList.forEach((a) => {
-        const submissions = Array.isArray(a.submissions) ? a.submissions : []
-        const mySub = submissions.find((s) => s.studentName === user.full_name)
-
-        if (!mySub && a.createdAt) {
-          list.push({
-            id: `new:${a.id}`,
-            type: "new",
-            message: `New assignment: "${a.assignment}"`,
-            link: `/assignment/${a.id}`,
-            timestamp: a.createdAt
-          })
-        }
-
-        if (!mySub) {
-          const diff = daysUntil(a.deadline)
-          if (diff !== null && diff <= 1) {
-            list.push({
-              id: `deadline:${a.id}`,
-              type: "deadline",
-              message: diff < 0
-                ? `Overdue: "${a.assignment}" was due ${formatShort(a.deadline)}`
-                : diff === 0
-                  ? `Due today: "${a.assignment}"`
-                  : `Due tomorrow: "${a.assignment}"`,
-              link: `/assignment/${a.id}`,
-              timestamp: a.deadline
-            })
-          }
-        }
-
-        if (mySub && isGradedValue(mySub.grade) && mySub.gradedAt) {
-          list.push({
-            id: `grade:${a.id}:${mySub.gradedAt}`,
-            type: "grade",
-            message: `Your submission for "${a.assignment}" was graded: ${mySub.grade}/100`,
-            link: `/assignment/${a.id}`,
-            timestamp: mySub.gradedAt
-          })
-        }
-      })
+      setNotifications([])
+      setUnreadCount(0)
     }
+  }, [isAuth, fetchAll])
 
-    return list.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
-  }, [assignmentsList, user])
+  const markAsRead = async (notificationId, isRead = true) => {
+    try {
+      const res = await api.patch(`/notifications/${notificationId}`, { is_read: isRead })
+      setNotifications((prev) => prev.map((n) => (n.id === notificationId ? res.data : n)))
+      setUnreadCount((prev) => Math.max(0, isRead ? prev - 1 : prev + 1))
+      return true
+    } catch (error) {
+      console.error("Error marking notification as read", error)
+      return false
+    }
+  }
 
-  const unreadCount = notifications.filter((n) => !seenIds.has(n.id)).length
+  // Mark every currently-unread notification as read (used when opening the bell)
+  const markAllRead = async () => {
+    const unread = notifications.filter((n) => !n.is_read)
+    if (unread.length === 0) return
+    await Promise.all(unread.map((n) => api.patch(`/notifications/${n.id}`, { is_read: true }).catch(() => null)))
+    setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })))
+    setUnreadCount(0)
+  }
 
-  const markAllRead = useCallback(() => {
-    const next = new Set(seenIds)
-    notifications.forEach((n) => next.add(n.id))
-    setSeenIds(next)
-    persistSeen(next)
-  }, [notifications, seenIds, persistSeen])
+  const deleteNotification = async (notificationId) => {
+    try {
+      await api.delete(`/notifications/${notificationId}`)
+      setNotifications((prev) => prev.filter((n) => n.id !== notificationId))
+      fetchUnreadCount()
+      return true
+    } catch (error) {
+      console.error("Error deleting notification", error)
+      return false
+    }
+  }
+
+  const clearAll = async () => {
+    try {
+      await api.delete('/notifications')
+      setNotifications([])
+      setUnreadCount(0)
+      return true
+    } catch (error) {
+      console.error("Error clearing notifications", error)
+      return false
+    }
+  }
+
+  // Teacher/admin only — notifies specific users directly (POST /notifications)
+  const notifyUsers = async (title, description, userIds, notificationType = "general") => {
+    try {
+      await api.post('/notifications', {
+        title,
+        description: description || null,
+        notification_type: notificationType,
+        icon_url: null,
+        user_ids: userIds
+      })
+      return true
+    } catch (error) {
+      console.error("Error sending notification", error)
+      return false
+    }
+  }
+
+  // Teacher/admin only — notifies every member of a group (e.g. right after
+  // creating a new assignment for that group).
+  const notifyGroup = async (groupId, title, description, notificationType = "assignment") => {
+    try {
+      await api.post('/notifications/bulk', {
+        title,
+        description: description || null,
+        notification_type: notificationType,
+        icon_url: null,
+        group_id: groupId
+      })
+      return true
+    } catch (error) {
+      console.error("Error sending group notification", error)
+      return false
+    }
+  }
 
   return (
-    <NotificationContext.Provider value={{ notifications, unreadCount, seenIds, markAllRead }}>
+    <NotificationContext.Provider
+      value={{
+        notifications,
+        unreadCount,
+        fetching,
+        markAsRead,
+        markAllRead,
+        deleteNotification,
+        clearAll,
+        notifyGroup,
+        notifyUsers,
+        fetchAll
+      }}
+    >
       {children}
     </NotificationContext.Provider>
   )
-}
-
-const formatShort = (dateStr) => {
-  const date = new Date(dateStr)
-  if (isNaN(date)) return dateStr
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" })
 }
 
 export const useNotifications = () => {

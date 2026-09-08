@@ -1,10 +1,9 @@
-import { useState } from 'react';
+import { useLanguage } from '../Providers/LanguageProvider'
 
 const RoleToggle = ({ activeRole, onChange }) => {
+  const { t } = useLanguage()
   return (
     <div className="flex bg-[#030712] p-1.5 rounded-xl border border-slate-800 w-full max-w-[400px]">
-      
-   
       <button
         type="button"
         onClick={() => onChange('student')}
@@ -14,9 +13,8 @@ const RoleToggle = ({ activeRole, onChange }) => {
             : 'text-slate-400 hover:text-white bg-transparent'
         }`}
       >
-        Student
+        {t('student_role')}
       </button>
-
 
       <button
         type="button"
@@ -27,7 +25,7 @@ const RoleToggle = ({ activeRole, onChange }) => {
             : 'text-slate-400 hover:text-white bg-transparent'
         }`}
       >
-        Teacher
+        {t('teacher_role')}
       </button>
 
     </div>

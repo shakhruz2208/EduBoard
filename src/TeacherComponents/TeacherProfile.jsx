@@ -1,12 +1,11 @@
 import IconsBg from '../SmallComponents/IconsBg'
 import ProfileCard from '../SmallComponents/ProfileCard';
 
-const TeacherProfile = ({setIsAuth}) => {
-     
+const TeacherProfile = () => {
   return (
     <div className='relative p-10'>
         <IconsBg/>
-      <ProfileCard setIsAuth={setIsAuth}/>
+      <ProfileCard/>
     </div>
   )
 }

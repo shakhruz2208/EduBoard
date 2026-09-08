@@ -1,139 +1,240 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react"
-import axios from "axios"
+import api from "../api"
 import { toast } from "react-toastify"
+import { useAuth } from "./AuthProvider"
 
 const AssignmentContext = createContext(null)
 
-const API_URL = "https://6a61aaafda10c59c1809b130.mockapi.io/assignment"
+const normalizeSubmission = (submission, studentEmail, studentName) => ({
+  id: submission.id,
+  assignmentId: submission.object_id,
+  studentId: submission.student_id,
+  studentEmail: studentEmail || submission.student_email,
+  studentName: studentName || submission.student_name || submission.student?.full_name || `Student #${submission.student_id}`,
+  text: submission.url,
+  submittedAt: submission.submitted_at,
+  late: false,
+  grade: submission.grade,
+  feedback: submission.feedback,
+  gradedAt: submission.graded_at
+})
 
 export const AssignmentProvider = ({ children }) => {
+  const { isAuth, user } = useAuth()
   const [assignmentsList, setAssignmentsList] = useState([])
+  const [submissions, setSubmissions] = useState([])
 
+  const [fetching, setFetching] = useState(false)
+  const [creating, setCreating] = useState(false)
+  const [submittingId, setSubmittingId] = useState(null)
+  const [gradingKey, setGradingKey] = useState(null)
+  const [deletingId, setDeletingId] = useState(null)
 
-  const [fetching, setFetching] = useState(false)      // initial/list refresh
-  const [creating, setCreating] = useState(false)       // posting a new assignment
-  const [deletingId, setDeletingId] = useState(null)    // id currently being deleted
-  const [submittingId, setSubmittingId] = useState(null) // assignment id student is submitting to
-  const [gradingKey, setGradingKey] = useState(null)    // `${assignmentId}:${studentName}` being graded
-
-  const fetchAssignments = useCallback(async () => {
+  const fetchAll = useCallback(async () => {
     try {
       setFetching(true)
-      const res = await axios.get(API_URL)
-      setAssignmentsList(res.data)
-    } catch (error) {
-      console.error("Ma'lumotlarni olishda xatolik", error)
+      const isTeacher = Boolean(user?.teacher)
+      const results = await Promise.allSettled(isTeacher
+        ? [api.get('/objects'), api.get('/teacher/homework')]
+        : [api.get('/objects'), api.get('/homework'), api.get('/me/homework')])
+
+      console.log('[AssignmentProvider] fetchAll results:', {
+        isTeacher,
+        resultsStatus: results.map((r, i) => ({ index: i, status: r.status })),
+        objectsData: results[0].status === 'fulfilled' ? results[0].value.data : results[0].reason?.message,
+        homeworkData: results[1].status === 'fulfilled' ? results[1].value.data : results[1].reason?.message,
+        meHomeworkData: !isTeacher && results[2] ? (results[2].status === 'fulfilled' ? results[2].value.data : results[2].reason?.message) : 'N/A'
+      })
+
+      if (results[0].status === "fulfilled") {
+        const data = results[0].value.data
+        const assignments = Array.isArray(data) ? data : data?.items
+        const assignmentsList = Array.isArray(assignments) ? assignments : []
+        setAssignmentsList(assignmentsList)
+        console.log('[AssignmentProvider] assignmentsList:', assignmentsList.map(a => ({ id: a.id, name: a.name, group_id: a.group_id })))
+      } else {
+        console.error("❌ Error fetching assignments", results[0].reason)
+      }
+
+      const homeworkResult = isTeacher ? results[1] : results[2]
+      if (homeworkResult.status === "fulfilled") {
+        const data = homeworkResult.value.data
+        const homework = Array.isArray(data) ? data : data?.items
+        if (Array.isArray(homework)) {
+          if (isTeacher) {
+            const assignments = results[0].status === "fulfilled"
+              ? (Array.isArray(results[0].value.data) ? results[0].value.data : results[0].value.data?.items)
+              : []
+            const groupIds = [...new Set((assignments || []).map((item) => item.group_id).filter(Boolean))]
+            const memberResults = await Promise.allSettled(
+              groupIds.map((groupId) => api.get(`/group/${groupId}/members`))
+            )
+            const studentsById = new Map()
+            memberResults.forEach((memberResult) => {
+              if (memberResult.status !== "fulfilled") return
+              const members = Array.isArray(memberResult.value.data)
+                ? memberResult.value.data
+                : memberResult.value.data?.items
+              ;(members || []).forEach((member) => studentsById.set(member.id, member))
+            })
+            setSubmissions(homework.map((item) => {
+              const student = studentsById.get(item.student_id)
+              return normalizeSubmission(item, student?.email, student?.full_name)
+            }))
+          } else {
+            const normalized = homework.map((item) => normalizeSubmission(item, user?.email, user?.full_name))
+            const submittedIds = new Set(normalized.map((item) => String(item.assignmentId)))
+            const objectsData = results[0].status === "fulfilled"
+              ? (Array.isArray(results[0].value.data) ? results[0].value.data : results[0].value.data?.items)
+              : []
+            const aliasResult = results[1]
+            const aliasData = aliasResult.status === "fulfilled" ? aliasResult.value.data : []
+            const aliasItems = Array.isArray(aliasData) ? aliasData : aliasData?.items || []
+            const nestedAssignments = aliasItems.map((item) => item.homework).filter(Boolean)
+            const assignmentsById = new Map([...(objectsData || []), ...nestedAssignments].map((item) => [String(item.id), item]))
+            setAssignmentsList([...assignmentsById.values()].map((item) => (
+              submittedIds.has(String(item.id)) ? { ...item, submitted: true } : item
+            )))
+            setSubmissions(normalized)
+          }
+        } else {
+          setSubmissions([])
+        }
+      } else {
+        console.error("Error fetching homework submissions", homeworkResult.reason)
+      }
     } finally {
       setFetching(false)
     }
-  }, [])
+  }, [user?.email, user?.full_name, user?.teacher])
 
   useEffect(() => {
-    fetchAssignments()
-  }, [fetchAssignments])
-
-  const addAssignment = async (assignment, deadline, teacherName, courseId, courseName) => {
-    if (!assignment.trim()) return false
-
-    const newData = {
-      assignment,
-      deadline,
-      teacherName: teacherName || "Unknown Teacher",
-      courseId: courseId || null,
-      courseName: courseName || null,
-      createdAt: new Date().toISOString()
+    if (isAuth) {
+      fetchAll()
+    } else {
+      setAssignmentsList([])
+      setSubmissions([])
     }
+  }, [isAuth, fetchAll])
 
+  const addAssignment = async (name, description, deadline, groupId) => {
+    if (!name.trim() || !groupId) return false
     try {
       setCreating(true)
-      const res = await axios.post(API_URL, newData)
+      const res = await api.post('/add-object', {
+        name: name.trim(),
+        description: description?.trim() || null,
+        deadline: deadline || null,
+        group_id: Number(groupId)
+      })
       setAssignmentsList((prev) => [...prev, res.data])
-      toast.success('Successfully Uploaded')
+
+      
+      await api.post('/notifications/bulk', {
+        title: 'New assignment posted',
+        description: `"${name.trim()}" was added to your course`,
+        notification_type: 'assignment',
+        icon_url: null,
+        group_id: Number(groupId)
+      }).catch((err) => console.error('Error sending assignment notification', err))
+
+      toast.success('Assignment created')
       return true
     } catch (error) {
-      toast.error('Error when uploading')
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'Error creating assignment')
       return false
     } finally {
       setCreating(false)
     }
   }
 
-  const deleteAssignment = async (id) => {
+  const deleteAssignment = async (assignmentId) => {
     try {
-      setDeletingId(id)
-      await axios.delete(`${API_URL}/${id}`)
-      setAssignmentsList((prev) => prev.filter((item) => item.id !== id))
-      toast.success('Successfully Deleted')
+      setDeletingId(assignmentId)
+      await api.delete(`/object/${assignmentId}`)
+      setAssignmentsList((prev) => prev.filter((item) => String(item.id) !== String(assignmentId)))
+      setSubmissions((prev) => prev.filter((item) => String(item.assignmentId) !== String(assignmentId)))
+      toast.success('Assignment deleted')
+      return true
     } catch (error) {
-      toast.error('Error when Deleting')
+      const detail = error?.response?.data?.detail
+      toast.error(typeof detail === 'string' ? detail : 'Error deleting assignment')
+      return false
     } finally {
       setDeletingId(null)
     }
   }
 
-
-  const submitAssignment = async (id, submissionText, studentName) => {
-    if (!submissionText.trim()) return false
-
-    const current = assignmentsList.find((item) => item.id === id)
-    if (!current) return false
-
-    const existingSubmissions = Array.isArray(current.submissions) ? current.submissions : []
-    const name = studentName || "Unknown Student"
-    const submittedAt = new Date()
-
-    const isLate = current.deadline ? submittedAt > new Date(current.deadline) : false
-
-    const newEntry = {
-      studentName: name,
-      text: submissionText.trim(),
-      submittedAt: submittedAt.toISOString(),
-      late: isLate
-    }
-
-    const alreadySubmittedIndex = existingSubmissions.findIndex((s) => s.studentName === name)
-    const updatedSubmissions = alreadySubmittedIndex >= 0
-      ? existingSubmissions.map((s, i) => (i === alreadySubmittedIndex ? newEntry : s))
-      : [...existingSubmissions, newEntry]
-
-    const updated = { ...current, submissions: updatedSubmissions }
+  const submitAssignment = async (assignmentId, text, studentName, studentEmail) => {
+    const submissionUrl = text.trim()
+    if (!submissionUrl) return false
 
     try {
-      setSubmittingId(id)
-      const res = await axios.put(`${API_URL}/${id}`, updated)
-      setAssignmentsList((prev) => prev.map((item) => (item.id === id ? res.data : item)))
+      const parsedUrl = new URL(submissionUrl)
+      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Unsupported URL protocol')
+    } catch {
+      toast.error('Please enter a valid link starting with https://')
+      return false
+    }
+
+    try {
+      setSubmittingId(assignmentId)
+
+      const res = await api.post(`/object/${assignmentId}/submit`, { url: submissionUrl })
+      const assignment = assignmentsList.find((a) => a.id === assignmentId)
+      const isLate = assignment?.deadline ? new Date() > new Date(assignment.deadline) : false
+      setAssignmentsList((prev) => prev.map((item) => (
+        item.id === assignmentId
+          ? { ...item, submitted: true, homework_url: res.data.url }
+          : item
+      )))
+
+      const submission = normalizeSubmission(res.data, studentEmail, studentName)
+      setSubmissions((prev) => [
+        ...prev.filter((item) => item.assignmentId !== assignmentId),
+        { ...submission, late: isLate }
+      ])
+
       toast.success(isLate ? 'Submitted (late)' : 'Assignment submitted successfully')
       return true
     } catch (error) {
-      toast.error('Error submitting assignment')
+      const detail = error?.response?.data?.detail
+      const message = Array.isArray(detail) ? detail[0]?.msg : detail
+      toast.error(typeof message === 'string' ? message : 'Error submitting assignment')
       return false
     } finally {
       setSubmittingId(null)
     }
   }
 
-  // Teacher grades one student's submission — saves score + optional feedback
-  const gradeSubmission = async (assignmentId, studentName, grade, feedback) => {
-    const current = assignmentsList.find((item) => item.id === assignmentId)
-    if (!current) return false
-
-    const existingSubmissions = Array.isArray(current.submissions) ? current.submissions : []
-    const updatedSubmissions = existingSubmissions.map((s) =>
-      s.studentName === studentName
-        ? { ...s, grade, feedback: feedback?.trim() || "", gradedAt: new Date().toISOString() }
-        : s
-    )
-
-    const updated = { ...current, submissions: updatedSubmissions }
-    const key = `${assignmentId}:${studentName}`
-
+  const gradeSubmission = async (submissionId, grade, feedback) => {
+    const key = String(submissionId)
     try {
       setGradingKey(key)
-      const res = await axios.put(`${API_URL}/${assignmentId}`, updated)
-      setAssignmentsList((prev) => prev.map((item) => (item.id === assignmentId ? res.data : item)))
+      const existing = submissions.find((s) => String(s.id) === key)
+      if (!existing) return false
+
+      const res = await api.patch(`/teacher/homework/${submissionId}/grade`, {
+        grade: Number(grade),
+        feedback: feedback?.trim() || null
+      })
+      const updated = normalizeSubmission(res.data, existing.studentEmail, existing.studentName)
+      setSubmissions((prev) => prev.map((s) => (String(s.id) === key ? updated : s)))
+
+      const assignment = assignmentsList.find((item) => String(item.id) === String(existing.assignmentId))
+      if (existing.studentId) {
+        api.post('/notifications', {
+          title: 'Homework graded',
+          description: `${assignment?.name || 'Your homework'} was graded: ${grade}/100`,
+          notification_type: 'grade',
+          icon_url: null,
+          user_ids: [Number(existing.studentId)]
+        }).catch((error) => console.error('Error sending grade notification', error))
+      }
       toast.success('Grade saved')
       return true
-    } catch (error) {
+    } catch {
       toast.error('Error saving grade')
       return false
     } finally {
@@ -141,20 +242,33 @@ export const AssignmentProvider = ({ children }) => {
     }
   }
 
+  const submissionsForAssignment = (assignmentId) =>
+    submissions.filter((s) => String(s.assignmentId) === String(assignmentId))
+
+  const mySubmission = (assignmentId, studentEmail) =>
+    submissions.find((s) => (
+      String(s.assignmentId) === String(assignmentId) &&
+      (!s.studentEmail || !studentEmail ||
+        String(s.studentEmail).toLowerCase() === String(studentEmail).toLowerCase())
+    )) || null
+
   return (
     <AssignmentContext.Provider
       value={{
         assignmentsList,
+        submissions,
         fetching,
         creating,
-        deletingId,
         submittingId,
         gradingKey,
-        fetchAssignments,
+        deletingId,
+        fetchAssignments: fetchAll,
         addAssignment,
         deleteAssignment,
         submitAssignment,
-        gradeSubmission
+        gradeSubmission,
+        submissionsForAssignment,
+        mySubmission
       }}
     >
       {children}

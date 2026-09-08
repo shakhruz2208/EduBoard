@@ -1,88 +1,79 @@
-// IconsBg.jsx
-import { useEffect, useRef } from 'react'
+// IconsBg.jsx — lightweight floating-icon background
+// Uses CSS keyframe animations instead of createRoot + rAF for performance.
+import { useMemo } from 'react'
 import {
   IconTerminal2, IconBrandGit, IconBug, IconFolderCode,
   IconCode, IconDatabase, IconApi, IconGitBranch,
   IconFileCode, IconCpu, IconDeviceLaptop, IconBrackets,
-
+  IconBrandReact,
 } from '@tabler/icons-react'
-import { createRoot } from 'react-dom/client'
 
 const iconComponents = [
   IconTerminal2, IconBrandGit, IconBug, IconFolderCode,
   IconCode, IconDatabase, IconApi, IconGitBranch,
-  IconFileCode, IconCpu, IconDeviceLaptop, IconBrackets ,
+  IconFileCode, IconCpu, IconDeviceLaptop, IconBrackets,
+  IconBrandReact,
 ]
 
+// Pre-generate positions once so they stay stable across re-renders
+const generateItems = (count) => {
+  const items = []
+  for (let i = 0; i < count; i++) {
+    items.push({
+      Icon: iconComponents[i % iconComponents.length],
+      size: 20 + (((i * 7 + 3) % 13) / 13) * 20,
+      opacity: 0.08 + (((i * 11 + 5) % 17) / 17) * 0.15,
+      left: `${((i * 13 + 7) % 100)}%`,
+      top: `${((i * 17 + 11) % 100)}%`,
+      animDuration: `${40 + ((i * 23) % 30)}s`,
+      animDelay: `${-((i * 7) % 20)}s`,
+      color: i % 2 === 0 ? 'rgba(167,139,250,' : 'rgba(99,102,241,',
+    })
+  }
+  return items
+}
+
+const ITEMS = generateItems(22)
+
 const IconsBg = () => {
-  const containerRef = useRef()
-
-  useEffect(() => {
-    const container = containerRef.current
-    const items = []
-
-    for (let i = 0; i < 22; i++) {
-      const wrapper = document.createElement('div')
-      const size = 20 + Math.random() * 20
-      const opacity = 0.08 + Math.random() * 0.15
-      const color = Math.random() > 0.5 ? 'rgba(167,139,250,' : 'rgba(99,102,241,'
-      wrapper.style.cssText = `
-        position: absolute;
-        color: ${color + opacity});
-        pointer-events: none;
-        user-select: none;
-      `
-      container.appendChild(wrapper)
-
-      const Icon = iconComponents[Math.floor(Math.random() * iconComponents.length)]
-      const root = createRoot(wrapper)
-      root.render(<Icon size={size} />)
-
-      items.push({
-        el: wrapper,
-        x: Math.random() * window.innerWidth,
-        y: Math.random() * window.innerHeight,
-        vx: (Math.random() - 0.5) * 0.5,
-        vy: (Math.random() - 0.5) * 0.5,
-        rotation: Math.random() * 360,
-        rotSpeed: (Math.random() - 0.5) * 0.4,
-      })
-    }
-
-    let animId
-    const animate = () => {
-      const w = window.innerWidth
-      const h = window.innerHeight
-      for (const s of items) {
-        s.x += s.vx; s.y += s.vy; s.rotation += s.rotSpeed
-        if (s.x < -60) s.x = w + 60
-        if (s.x > w + 60) s.x = -60
-        if (s.y < -60) s.y = h + 60
-        if (s.y > h + 60) s.y = -60
-        s.el.style.left = s.x + 'px'
-        s.el.style.top = s.y + 'px'
-        s.el.style.transform = `rotate(${s.rotation}deg)`
-      }
-      animId = requestAnimationFrame(animate)
-    }
-    animate()
-
-    return () => {
-      cancelAnimationFrame(animId)
-      items.forEach(s => s.el.remove())
-    }
-  }, [])
+  const renderedItems = useMemo(() => ITEMS, [])
 
   return (
     <div
-      ref={containerRef}
       style={{
         position: 'fixed', top: 0, left: 0,
         width: '100%', height: '100%',
         background: '#0D1B4B', zIndex: 0,
-        overflow: 'hidden', pointerEvents: 'none'
+        overflow: 'hidden', pointerEvents: 'none',
       }}
-    />
+    >
+      {renderedItems.map((item, i) => (
+        <div
+          key={i}
+          style={{
+            position: 'absolute',
+            color: `${item.color}${item.opacity})`,
+            left: item.left,
+            top: item.top,
+            pointerEvents: 'none',
+            userSelect: 'none',
+            animation: `iconsFloat ${item.animDuration} linear ${item.animDelay} infinite`,
+          }}
+        >
+          <item.Icon size={item.size} />
+        </div>
+      ))}
+
+      <style>{`
+        @keyframes iconsFloat {
+          0%   { transform: translate(0, 0) rotate(0deg); }
+          25%  { transform: translate(30px, -40px) rotate(90deg); }
+          50%  { transform: translate(-20px, -80px) rotate(180deg); }
+          75%  { transform: translate(40px, -40px) rotate(270deg); }
+          100% { transform: translate(0, 0) rotate(360deg); }
+        }
+      `}</style>
+    </div>
   )
 }
 

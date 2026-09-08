@@ -9,12 +9,12 @@ import LanguageSwitcher from "../components/LanguageSwitcher"
 const AvatarCircle = ({ avatarUrl, avatarLetter, role }) => (
     <NavLink
         to={role === 'teacher' ? '/teacher-profile' : '/student-profile'}
-        className="w-11 h-11 lg:w-12 lg:h-12 rounded-full shadow-[0_0_0_3px_rgba(99,102,241,0.25)] flex items-center justify-center overflow-hidden transition-transform hover:scale-105 shrink-0 bg-gradient-to-br from-indigo-700 to-purple-700"
+        className="w-10 h-10 sm:w-11 sm:h-11 lg:w-12 lg:h-12 rounded-full shadow-[0_0_0_3px_rgba(99,102,241,0.25)] flex items-center justify-center overflow-hidden transition-transform hover:scale-105 shrink-0 bg-gradient-to-br from-indigo-700 to-purple-700"
     >
         {avatarUrl ? (
             <img src={avatarUrl} alt="avatar" className="w-full h-full object-cover" />
         ) : (
-            <span className="text-white text-xl pb-1 font-bold">{avatarLetter}</span>
+            <span className="text-white text-lg sm:text-xl pb-1 font-bold">{avatarLetter}</span>
         )}
     </NavLink>
 )
@@ -34,12 +34,12 @@ const Header = () => {
     ]
     const studentLinks = [
         { name: t('nav_assignments'), path: '/student-dashboard' },
+        { name: t('nav_lessons'), path: '/student-lessons' },
         { name: t('nav_rating'), path: '/students-rating' },
         { name: t('nav_grades'), path: '/student-grades' }
     ]
 
     const currentLinks = role === 'teacher' ? teacherLinks : studentLinks
-
     const avatarLetter = user?.full_name?.[0] || (role === 'teacher' ? 'T' : 'S')
 
     const linkClass = ({ isActive }) =>
@@ -48,13 +48,12 @@ const Header = () => {
         after:content-[""] after:absolute after:left-0 after:bottom-0 after:h-[2px] after:bg-white after:transition-all after:duration-300`
 
     return (
-        <div className='w-full h-18 bg-blue-950 relative z-50 px-4 sm:px-6'>
-            <div className='grid grid-cols-[auto_1fr_auto] items-center h-full w-full'>
+        <div className='w-full min-h-18 bg-blue-950 relative z-50 px-3 sm:px-6'>
+            <div className='flex items-center justify-between h-full w-full py-3 gap-2'>
 
-                <h1 className='font-bold text-xl sm:text-2xl text-white shrink-0'>{t('brand')}</h1>
+                <h1 className='font-bold text-lg sm:text-xl lg:text-2xl text-white shrink-0'>{t('brand')}</h1>
 
-                {/* Markazdagi linklar — faqat lg dan boshlab */}
-                <div className="hidden lg:flex justify-center gap-10">
+                <div className="hidden lg:flex justify-center gap-10 flex-1">
                     {currentLinks.map((link, index) => (
                         <NavLink key={index} className={linkClass} to={link.path}>
                             {link.name}
@@ -62,24 +61,18 @@ const Header = () => {
                     ))}
                 </div>
 
-                {/* O'ng tomon — desktop */}
-                <div className="hidden lg:flex items-center gap-4 justify-self-end">
+                <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 shrink-0">
                     <LanguageSwitcher />
                     <NotificationBell />
                     <AvatarCircle avatarUrl={avatarUrl} avatarLetter={avatarLetter} role={role} />
-                </div>
-
-                <div className="flex lg:hidden items-center gap-3 sm:gap-4 col-start-3 justify-self-end">
-                    <NotificationBell />
-                    <AvatarCircle avatarUrl={avatarUrl} avatarLetter={avatarLetter} role={role} />
-                    <button onClick={() => setMenuOpen(!menuOpen)} className="text-white">
-                        {menuOpen ? <IconX size={26} /> : <IconMenu2 size={26} />}
+                    <button onClick={() => setMenuOpen(!menuOpen)} className="text-white lg:hidden">
+                        {menuOpen ? <IconX size={24} /> : <IconMenu2 size={24} />}
                     </button>
                 </div>
             </div>
 
             {menuOpen && (
-                <div className="lg:hidden absolute top-18 left-0 w-full bg-blue-950 border-t border-blue-800 flex flex-col px-4 py-4 gap-4 shadow-lg">
+                <div className="lg:hidden absolute top-full left-0 w-full bg-blue-950 border-t border-blue-800 flex flex-col px-4 py-4 gap-4 shadow-lg">
                     {currentLinks.map((link, index) => (
                         <NavLink
                             key={index}
@@ -92,9 +85,6 @@ const Header = () => {
                             {link.name}
                         </NavLink>
                     ))}
-                    <div className="pt-2 border-t border-blue-800">
-                        <LanguageSwitcher />
-                    </div>
                 </div>
             )}
         </div>
