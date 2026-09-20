@@ -3,6 +3,7 @@ import { MdOutlineNotifications } from "react-icons/md"
 import { IoDocumentTextOutline, IoTimeOutline, IoCheckmarkCircleOutline, IoTrashOutline } from "react-icons/io5"
 import { useNotifications } from "../Providers/NotificationProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
+import { timeAgo } from "../utils/datetime"
 
 const ICONS = {
   assignment: IoDocumentTextOutline,
@@ -10,18 +11,7 @@ const ICONS = {
   grade: IoCheckmarkCircleOutline
 }
 
-const timeAgo = (dateStr) => {
-  const date = new Date(dateStr)
-  if (isNaN(date)) return ""
-  const diffMs = Date.now() - date.getTime()
-  const diffMin = Math.round(diffMs / 60000)
-  if (diffMin < 1) return "just now"
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.round(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.round(diffHr / 24)
-  return `${diffDay}d ago`
-}
+
 
 const NotificationBell = () => {
   const { notifications, unreadCount, markAllRead, deleteNotification } = useNotifications()
@@ -61,7 +51,7 @@ const NotificationBell = () => {
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-3 w-80 sm:w-96 max-h-[70vh] overflow-y-auto bg-[#0e1442] border border-indigo-900/60 rounded-2xl shadow-2xl z-50">
+        <div className="absolute right-0 mt-3 w-80 sm:w-96 max-h-[70vh] overflow-y-auto bg-[#0e1442] border border-indigo-900/60 rounded-2xl shadow-2xl z-50 origin-top-right animate-scale-in">
           <div className="px-4 py-3 border-b border-indigo-900/50">
             <h3 className="text-white font-semibold text-sm">{t('notifications_title')}</h3>
           </div>

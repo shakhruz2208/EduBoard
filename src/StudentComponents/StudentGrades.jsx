@@ -6,19 +6,10 @@ import { HiOutlineDocumentText } from "react-icons/hi2"
 import { useAssignments } from "../Providers/AssignmentProvider"
 import { useAuth } from "../Providers/AuthProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
+import { formatDate, parseServerDate } from "../utils/datetime"
+import { StudentGradeCharts } from "../SmallComponents/Analytics"
 
-const formatDate = (isoStr) => {
-  if (!isoStr) return "—"
-  const date = new Date(isoStr)
-  if (isNaN(date)) return isoStr
-  return date.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  })
-}
+// formatDate now comes from utils/datetime (UTC-safe)
 
 const getGradeColor = (grade) => {
   if (grade === null || grade === undefined) return "text-slate-500"
@@ -49,7 +40,7 @@ const StudentGrades = () => {
         ...sub,
         assignment: assignmentMap.get(String(sub.assignmentId)),
       }))
-      .sort((a, b) => new Date(b.submittedAt || 0) - new Date(a.submittedAt || 0))
+      .sort((a, b) => parseServerDate(b.submittedAt || 0) - parseServerDate(a.submittedAt || 0))
   }, [mySubmissions, assignmentsList])
 
   const gradedSubmissions = gradesWithAssignment.filter(
@@ -89,7 +80,7 @@ const StudentGrades = () => {
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8 stagger stagger">
           <div className="bg-[#0b153f] border border-indigo-800/50 rounded-2xl p-5">
             <p className="text-[10px] uppercase tracking-wider text-indigo-400 font-bold">
               {t("total_label")}
@@ -129,6 +120,9 @@ const StudentGrades = () => {
             <p className="text-amber-300 text-sm mt-1">{t('awaiting_review_word')}</p>
           </div>
         </div>
+
+        {/* Charts */}
+        <StudentGradeCharts gradesWithAssignment={gradesWithAssignment} />
 
         {/* Grades list */}
         <section className="bg-[#0b153f] border border-indigo-800/50 rounded-2xl overflow-hidden">

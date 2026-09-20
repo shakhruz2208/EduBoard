@@ -5,21 +5,11 @@ import { BiCalendar } from "react-icons/bi"
 import { HiOutlineDocumentText } from "react-icons/hi"
 import { CgSpinner } from "react-icons/cg"
 import api from "../api"
+import { formatDate, formatDateTime } from "../utils/datetime"
 import { useAssignments } from "../Providers/AssignmentProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
 
-const formatDate = (deadlineStr) => {
-  if (!deadlineStr) return "Not set"
-  const date = new Date(deadlineStr)
-  if (isNaN(date)) return deadlineStr
-  return date.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-}
-
-const formatDateTime = (isoStr) => {
-  const date = new Date(isoStr)
-  if (isNaN(date)) return isoStr
-  return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-}
+// formatDate/formatDateTime now come from utils/datetime (UTC-safe)
 
 const ACCENTS = [
   "from-blue-500 to-indigo-600",

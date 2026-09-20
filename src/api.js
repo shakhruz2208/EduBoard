@@ -60,17 +60,28 @@ api.interceptors.response.use(
           withCredentials: true,
           timeout: 90000,
         })
-        const newToken = refreshRes.data.access_token
+        const newToken = refreshRes.data?.access_token
+        if (!newToken) throw new Error('Refresh response did not contain access_token')
         localStorage.setItem('access_token', newToken)
         processQueue(null, newToken)
         originalRequest.headers.Authorization = `Bearer ${newToken}`
         return api(originalRequest)
       } catch (refreshError) {
         processQueue(refreshError, null)
-        // Only clear token and redirect if the refresh endpoint explicitly rejected us
-        if (refreshError.response?.status === 401 || refreshError.response?.status === 403) {
+        const refreshStatus = refreshError.response?.status
+        const isColdStart = !refreshError.response
+          || refreshError.code === 'ECONNABORTED'
+          || [502, 503, 504].includes(refreshStatus)
+        // The app itself answered and refused/failed the refresh:
+        // 401/403 = invalid refresh cookie, 500 = broken refresh on the server.
+        // In both cases the session is unrecoverable — clear token and re-login.
+        // On pure network errors or gateway errors (Render cold start) keep the
+        // session and let the user retry once the server is up.
+        if (!isColdStart) {
           localStorage.removeItem('access_token')
-          window.location.href = '/login'
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
         }
         return Promise.reject(refreshError)
       } finally {

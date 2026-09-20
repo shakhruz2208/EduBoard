@@ -3,9 +3,12 @@ import { useNavigate } from "react-router-dom"
 import { BiArrowBack, BiChevronDown } from "react-icons/bi"
 import { IoCheckmarkCircleOutline } from "react-icons/io5"
 import { useAssignments } from "../Providers/AssignmentProvider"
-import { useAuth } from "../Providers/AuthProvider"
+import { useAuth, resolveAvatarUrl } from "../Providers/AuthProvider"
 import { useCourses } from "../Providers/CourseProvider"
 import api from "../api"
+import { normalizeAttendanceList } from "../utils/backend"
+import { parseServerDate } from "../utils/datetime"
+import { attendancePoints, normalizeGradeRows, totalScore } from "../utils/scoring"
 import { useLanguage } from "../Providers/LanguageProvider"
 
 const getScoreMood = (score, t) => {
@@ -16,77 +19,115 @@ const getScoreMood = (score, t) => {
   return { emoji: '🌱', tone: 'text-slate-400', label: t('mood_no_score_yet') }
 }
 
+// Avatar with photo + initials fallback
+const RatingAvatar = ({ member, name, size = 'w-14 h-14 text-lg', round = true }) => {
+  const src = resolveAvatarUrl(member?.profile_pic)
+  const initial = name?.[0]?.toUpperCase() || '?'
+  return (
+    <div className={`${size} ${round ? 'rounded-full' : 'rounded-xl'} overflow-hidden bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black shrink-0`}>
+      {src ? (
+        <img src={src} alt={name || 'Student'} className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; e.currentTarget.nextElementSibling?.classList.remove('hidden') }} />
+      ) : null}
+      <span className={src ? 'hidden' : ''}>{initial}</span>
+    </div>
+  )
+}
+
 const StudentRating = () => {
   const navigate = useNavigate()
   const { user } = useAuth()
   const { t } = useLanguage()
-  const { assignmentsList, submissions, fetching } = useAssignments()
+  const { assignmentsList, fetching } = useAssignments()
   const { courses, myGroup } = useCourses()
   const [selectedCourse, setSelectedCourse] = useState("all")
   const [ratingPeriod, setRatingPeriod] = useState("monthly")
   const [now] = useState(() => Date.now())
-  const [rating, setRating] = useState(null)
-  const [grades, setGrades] = useState([])
+  const [grades, setGrades] = useState([]) // rows from /student/grades
   const [ratingFetching, setRatingFetching] = useState(true)
   const [courseMembers, setCourseMembers] = useState([])
   const [attendanceScores, setAttendanceScores] = useState([])
+  const [bonusByStudent, setBonusByStudent] = useState({}) // studentId → bonus points from /student/rating
+
+  // All enrolled courses (union of /me/groups and /me/group)
+  const allCourses = useMemo(() => {
+    const list = [...(courses || [])]
+    if (myGroup && !list.some((c) => c.id === myGroup.id)) list.push(myGroup)
+    return list
+  }, [courses, myGroup])
 
   useEffect(() => {
     let cancelled = false
-    Promise.allSettled([api.get('/student/rating'), api.get('/student/grades')])
-      .then(([ratingResult, gradesResult]) => {
-        if (cancelled) return
-        if (ratingResult.status === 'fulfilled') {
-          const data = ratingResult.value.data
-          const ratings = Array.isArray(data) ? data : data?.items || []
-          setRating(ratings)
-        }
-        if (gradesResult.status === 'fulfilled') {
-          const data = gradesResult.value.data
-          setGrades(Array.isArray(data) ? data : data?.items || [])
-        }
-      })
+    api.get('/student/grades')
+      .then((res) => { if (!cancelled) setGrades(normalizeGradeRows(res.data)) })
+      .catch(() => { if (!cancelled) setGrades([]) })
       .finally(() => { if (!cancelled) setRatingFetching(false) })
     return () => { cancelled = true }
   }, [])
 
-  // Fetch attendance scores from all lessons in all courses
+  // Teacher bonus points (GET /student/rating) — additive on top of grades+attendance.
   useEffect(() => {
     let cancelled = false
-    const allCourses = [...(courses || [])]
-    if (myGroup && !allCourses.some((c) => c.id === myGroup.id)) allCourses.push(myGroup)
+    api.get('/student/rating')
+      .then((res) => {
+        if (cancelled) return
+        const items = Array.isArray(res.data) ? res.data : res.data?.items || []
+        const map = {}
+        items.forEach((r) => {
+          const sid = String(r.student_id ?? r.id ?? '')
+          if (!sid) return
+          map[sid] = (map[sid] || 0) + Number(r.score || 0)
+        })
+        setBonusByStudent(map)
+      })
+      .catch(() => { if (!cancelled) setBonusByStudent({}) })
+    return () => { cancelled = true }
+  }, [])
+
+  // Fetch attendance from all lessons in all enrolled courses
+  useEffect(() => {
+    let cancelled = false
     if (!allCourses.length) return
 
     Promise.allSettled(allCourses.map((c) => api.get(`/groups/${c.id}/lessons`)))
       .then(async (lessonResults) => {
         if (cancelled) return
         const lessons = []
+        const seen = new Set()
         lessonResults.forEach((r) => {
           if (r.status !== 'fulfilled') return
           const items = Array.isArray(r.value.data) ? r.value.data : r.value.data?.items || []
-          items.forEach((l) => lessons.push(l))
+          items.forEach((l) => {
+            if (seen.has(l.id)) return
+            seen.add(l.id)
+            lessons.push(l)
+          })
         })
-        if (!lessons.length) return
+        if (!lessons.length) { if (!cancelled) setAttendanceScores([]); return }
 
         const attResults = await Promise.allSettled(
           lessons.map((l) => api.get(`/lessons/${l.id}/attendance`))
         )
         const allAtt = []
+        const seenRows = new Set()
         attResults.forEach((r) => {
           if (r.status !== 'fulfilled') return
-          const items = Array.isArray(r.value.data) ? r.value.data : r.value.data?.items || []
-          items.forEach((a) => allAtt.push(a))
+          normalizeAttendanceList(r.value.data).forEach((a) => {
+            const key = `${a.id ?? ''}:${a.studentId}`
+            if (seenRows.has(key)) return
+            seenRows.add(key)
+            allAtt.push(a)
+          })
         })
         if (!cancelled) setAttendanceScores(allAtt)
       })
-      .catch(() => {})
+      .catch(() => { if (!cancelled) setAttendanceScores([]) })
     return () => { cancelled = true }
-  }, [courses, myGroup])
+  }, [allCourses])
 
   useEffect(() => {
     let cancelled = false
-    if (!courses.length) return undefined
-    Promise.allSettled(courses.map((course) => api.get(`/group/${course.id}/members`)))
+    if (!allCourses.length) return undefined
+    Promise.allSettled(allCourses.map((course) => api.get(`/group/${course.id}/members`)))
       .then((results) => {
         if (cancelled) return
         const members = results.flatMap((result) => {
@@ -97,64 +138,88 @@ const StudentRating = () => {
         const unique = new Map(members.map((member) => [member.id, member]))
         setCourseMembers([...unique.values()])
       })
+      .catch(() => { if (!cancelled) setCourseMembers([]) })
     return () => { cancelled = true }
-  }, [courses])
+  }, [allCourses])
 
   const courseOptions = useMemo(() => {
-    const available = [...(courses || [])]
-    if (myGroup && !available.some((course) => course.id === myGroup.id)) available.push(myGroup)
-    const assignmentGroups = new Set(assignmentsList.map((item) => String(item.group_id)))
-    return available.filter((course) => assignmentGroups.has(String(course.id)))
-  }, [assignmentsList, courses, myGroup])
+    const known = new Set(assignmentsList.map((item) => String(item.group_id)))
+    known.add('all')
+    return allCourses.filter((course) => known.has(String(course.id)) || selectedCourse === String(course.id))
+  }, [assignmentsList, allCourses, selectedCourse])
 
+  // Assignments of the selected course (mirrored objects carry activity meta)
   const courseAssignments = useMemo(() => assignmentsList.filter((item) => (
     selectedCourse === "all" || String(item.group_id) === String(selectedCourse)
   )), [assignmentsList, selectedCourse])
 
-  const assignmentIds = new Set(courseAssignments.map((item) => String(item.id)))
-  const mySubmissions = (grades.length ? grades : submissions).filter((submission) => (
-    assignmentIds.has(String(submission.assignmentId))
-  ))
-  const gradedSubmissions = mySubmissions.filter((submission) => (
-    submission.grade !== null && submission.grade !== undefined && submission.grade !== ""
-  ))
-  const ratingScores = useMemo(() => {
+  const assignmentIds = useMemo(() =>
+    new Set(courseAssignments.map((item) => String(item.id))),
+  [courseAssignments])
+
+  // Graded homework rows within the selected course (grade → points 1:1)
+  const gradedRows = useMemo(() => {
     const periodMs = ratingPeriod === 'weekly' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
-    return (Array.isArray(rating) ? rating : rating ? [rating] : []).filter((item) => {
-      const createdAt = new Date(item.created_at || item.updated_at).getTime()
-      return Number.isFinite(createdAt) && now - createdAt <= periodMs
+    const cutoff = now - periodMs
+    return grades.filter((row) => {
+      if (row.grade == null || row.grade === "") return false
+      if (!assignmentIds.has(String(row.assignmentId))) return false
+      // Server timestamps are naive UTC — parseServerDate handles the offset
+      const gradedAt = parseServerDate(row.gradedAt || row.submittedAt)
+      if (!gradedAt) return true // undated rows always count
+      return gradedAt.getTime() >= cutoff
     })
-  }, [now, rating, ratingPeriod])
+  }, [grades, assignmentIds, ratingPeriod, now])
+
+  // Attendance rows within the selected course, filtered by the same period
+  const periodAttendance = useMemo(() => {
+    const periodMs = ratingPeriod === 'weekly' ? 7 * 24 * 60 * 60 * 1000 : 30 * 24 * 60 * 60 * 1000
+    const cutoff = now - periodMs
+    return attendanceScores.filter((row) => {
+      const at = parseServerDate(row.updatedAt || row.markedAt)
+      if (!at) return true
+      return at.getTime() >= cutoff
+    })
+  }, [attendanceScores, ratingPeriod, now])
+
+  const myGradedRows = gradedRows.filter((row) => String(row.studentId) === String(user?.id))
+
   const leaderboard = useMemo(() => {
-    const scores = new Map()
-    // Add assignment/grade scores
-    ratingScores.forEach((item) => {
-      const id = String(item.student_id)
-      scores.set(id, (scores.get(id) || 0) + Number(item.score || 0))
+    const graded = new Map()
+    gradedRows.forEach((row) => {
+      const id = String(row.studentId)
+      graded.set(id, (graded.get(id) || 0) + Number(row.grade))
     })
-    // Add attendance scores
-    attendanceScores.forEach((item) => {
-      const id = String(item.user_id || item.student_id)
-      if (id && id !== 'undefined') {
-        scores.set(id, (scores.get(id) || 0) + Number(item.score || 0))
-      }
+    const attendance = new Map()
+    periodAttendance.forEach((row) => {
+      const id = String(row.studentId)
+      if (!id || id === 'undefined') return
+      attendance.set(id, (attendance.get(id) || 0) + attendancePoints(row.status))
     })
-    courseMembers.forEach((member) => {
-      if (!scores.has(String(member.id))) scores.set(String(member.id), 0)
-    })
-    return [...scores.entries()]
-      .map(([studentId, score]) => ({
-        studentId,
-        score,
-        student: courseMembers.find((member) => String(member.id) === studentId)
+    const ids = new Set([
+      ...graded.keys(),
+      ...attendance.keys(),
+      ...courseMembers.map((m) => String(m.id)),
+    ])
+    return [...ids]
+      .map((id) => ({
+        studentId: id,
+        gradedPoints: graded.get(id) || 0,
+        attendancePoints: attendance.get(id) || 0,
+        score: totalScore({ gradedPoints: graded.get(id) || 0, attendance: attendance.get(id) || 0 }),
+        bonusPoints: bonusByStudent[id] || 0,
+        student: courseMembers.find((member) => String(member.id) === id)
       }))
-      .filter((item) => item.student)
+      .map((item) => ({ ...item, score: item.score + item.bonusPoints }))
+      .filter((item) => item.student || item.score > 0)
       .sort((a, b) => b.score - a.score)
-  }, [courseMembers, ratingScores, attendanceScores])
+  }, [courseMembers, gradedRows, periodAttendance, bonusByStudent])
+
   const myRank = leaderboard.findIndex((item) => String(item.studentId) === String(user?.id)) + 1
+  const myScore = leaderboard.find((item) => String(item.studentId) === String(user?.id))?.score || 0
   const selectedCourseName = selectedCourse === "all"
     ? t('all_courses')
-    : courseOptions.find((course) => String(course.id) === String(selectedCourse))?.name || "Course"
+    : allCourses.find((course) => String(course.id) === String(selectedCourse))?.name || "Course"
 
   return (
     <div className="min-h-screen w-full bg-[#03071e] text-white px-5 py-6 sm:px-10 sm:py-8">
@@ -192,55 +257,78 @@ const StudentRating = () => {
           </div>
         </header>
 
-        <section className="grid grid-cols-1 md:grid-cols-3 items-end gap-4 mb-8">
-          {[1, 0, 2].map((index) => {
-            const item = leaderboard[index]
-            return (
-              <div key={index} className={`${index === 0 ? 'md:order-2 min-h-56 border-lime-400/50' : index === 1 ? 'md:order-1 min-h-48 border-slate-400/40' : 'md:order-3 min-h-48 border-orange-500/40'} bg-gradient-to-b from-[#182665] to-[#101a50] border rounded-2xl p-5 text-center flex flex-col justify-end`}>
-                <div className="text-3xl mb-2">{index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉'}</div>
-                <div className="w-14 h-14 mx-auto rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-black text-lg">{item?.student?.full_name?.[0]?.toUpperCase() || '?'}</div>
-                <p className="mt-3 text-white font-bold truncate">{item?.student?.full_name || 'No student'}</p>
-                <p className="text-lime-300 font-bold mt-1">{item?.score || 0} {t('points')}</p>
-                <p className="text-xs mt-1"><span>{getScoreMood(item?.score || 0, t).emoji}</span> <span className={getScoreMood(item?.score || 0, t).tone}>{getScoreMood(item?.score || 0, t).label}</span></p>
-              </div>
-            )
-          })}
+        {/* TOP-3 podium */}
+        {leaderboard.length >= 3 && (
+          <section className="grid grid-cols-1 md:grid-cols-3 items-end gap-4 mb-8">
+            {[1, 0, 2].map((index) => {
+              const item = leaderboard[index]
+              return (
+                <div key={index} className={`${index === 0 ? 'md:order-2 min-h-56 border-lime-400/50' : index === 1 ? 'md:order-1 min-h-48 border-slate-400/40' : 'md:order-3 min-h-48 border-orange-500/40'} bg-gradient-to-b from-[#182665] to-[#101a50] border rounded-2xl p-5 text-center flex flex-col justify-end`}>
+                  <div className="text-3xl mb-2">{index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉'}</div>
+                  <div className="mx-auto"><RatingAvatar member={item?.student} name={item?.student?.full_name} size={index === 0 ? 'w-16 h-16 text-xl' : 'w-14 h-14 text-lg'} /></div>
+                  <p className="mt-3 text-white font-bold truncate">{item?.student?.full_name || '—'}</p>
+                  <p className="text-lime-300 font-bold mt-1">{item?.score || 0} {t('points')}</p>
+                  <p className="text-xs mt-1"><span>{getScoreMood(item?.score || 0, t).emoji}</span> <span className={getScoreMood(item?.score || 0, t).tone}>{getScoreMood(item?.score || 0, t).label}</span></p>
+                </div>
+              )
+            })}
+          </section>
+        )}
+
+        {/* My score summary */}
+        <section className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <div className="bg-gradient-to-b from-[#182665] to-[#101a50] border border-lime-400/40 rounded-2xl p-5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">{t('your_rank')}</p>
+            <p className="text-3xl font-black text-white mt-2">{myRank || '—'}</p>
+          </div>
+          <div className="bg-gradient-to-b from-[#182665] to-[#101a50] border border-indigo-500/30 rounded-2xl p-5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">{t('points')}</p>
+            <p className="text-3xl font-black text-lime-300 mt-2">{myScore}</p>
+          </div>
+          <div className="bg-gradient-to-b from-[#182665] to-[#101a50] border border-indigo-500/30 rounded-2xl p-5 text-center">
+            <p className="text-[10px] uppercase tracking-wider text-indigo-300 font-bold">{t('graded_count', myGradedRows.length)}</p>
+            <p className="text-xs mt-3"><span>{getScoreMood(myScore, t).emoji}</span> <span className={getScoreMood(myScore, t).tone}>{getScoreMood(myScore, t).label}</span></p>
+          </div>
         </section>
 
         <section className="bg-[#0b153f] border border-indigo-800/50 rounded-2xl overflow-hidden">
           <div className="flex items-center justify-between gap-4 px-5 sm:px-7 py-5 border-b border-indigo-800/50">
             <div>
               <p className="text-white font-bold text-lg">{t('overall_ranking')}</p>
-              <p className="text-indigo-300 text-xs mt-1">{selectedCourseName} · {t(ratingPeriod)} · {t('your_rank')}: {myRank || '-'}</p>
+              <p className="text-indigo-300 text-xs mt-1">
+                {selectedCourseName} · {t(ratingPeriod)} · {t('your_rank')}: {myRank || '-'}
+              </p>
             </div>
             <div className="flex items-center gap-2 text-xs text-lime-300 font-semibold">
-              <IoCheckmarkCircleOutline /> {t('graded_count', gradedSubmissions.length)}
+              <IoCheckmarkCircleOutline /> {t('graded_count', myGradedRows.length)}
             </div>
           </div>
 
           {(fetching || ratingFetching) && courseAssignments.length === 0 ? (
             <p className="text-center text-slate-400 py-16">{t('loading_results')}</p>
-          ) : courseAssignments.length === 0 ? (
-            <p className="text-center text-slate-400 py-16">{t('no_assignments_course')}</p>
-          ) : leaderboard.length > 0 ? (
+          ) : leaderboard.length === 0 ? (
+            <p className="text-center text-slate-400 py-16">{t('no_rating_data')}</p>
+          ) : (
             <div className="divide-y divide-indigo-900/60">
-              {leaderboard.map((item, index) => {
-                return (
-                  <div key={item.studentId} className="flex items-center gap-4 px-5 sm:px-7 py-4 hover:bg-indigo-900/20 transition-colors">
+              {leaderboard.map((item, index) => (                  <div key={item.studentId} className={`flex items-center gap-4 px-5 sm:px-7 py-4 hover:bg-indigo-900/20 transition-colors ${String(item.studentId) === String(user?.id) ? 'bg-lime-400/5' : ''}`}>
                     <span className="w-9 h-9 rounded-xl bg-indigo-900/60 flex items-center justify-center shrink-0">
                       {index + 1}
                     </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-white font-semibold truncate">{item.student.full_name}</span>
-                      <span className="block text-xs text-slate-400 mt-1">{item.student.email}</span>
+                    <RatingAvatar member={item.student} name={item.student?.full_name} size="w-9 h-9 text-sm" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-white font-semibold truncate">
+                      {item.student?.full_name || `Student #${item.studentId}`}
+                      {String(item.studentId) === String(user?.id) && <span className="text-lime-300 text-xs ml-2">({t('your_rank')})</span>}
                     </span>
-                    <span className="text-right"><span className="block text-sm font-bold text-lime-300">{item.score} {t('points')}</span><span className="text-xs">{getScoreMood(item.score, t).emoji}</span></span>
-                  </div>
-                )
-              })}
+                    <span className="block text-xs text-slate-400 mt-1">
+                      {item.student?.email || `Homework: ${item.gradedPoints} pts · Attendance: ${item.attendancePoints} pts`}
+                      {item.bonusPoints > 0 && <span className="text-emerald-400 ml-2">· ⭐ +{item.bonusPoints}</span>}
+                    </span>
+                  </span>
+                  <span className="text-right"><span className="block text-sm font-bold text-lime-300">{item.score} {t('points')}</span><span className="text-xs">{getScoreMood(item.score, t).emoji}</span></span>
+                </div>
+              ))}
             </div>
-          ) : (
-            <p className="text-center text-slate-400 py-16">{t('no_rating_data')}</p>
           )}
         </section>
       </div>

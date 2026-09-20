@@ -4,15 +4,18 @@ import { IoArrowBack } from "react-icons/io5"
 import { BiCalendar } from "react-icons/bi"
 import { CgSpinner } from "react-icons/cg"
 import api from "../api"
+import { formatDate, formatDateTime, msUntil } from "../utils/datetime"
+import { normalizeActivity } from "../utils/backend"
 import { useAssignments } from "../Providers/AssignmentProvider"
 import { useAuth } from "../Providers/AuthProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
+import { parseQuestions, buildQuizSubmission, extractQuizAnswers, getQuizAttempts, recordQuizAttempt, MAX_QUIZ_ATTEMPTS } from "../utils/quiz"
+import QuizModal, { QuizResultBadge } from "./QuizModal"
 
 const getDeadlineStatus = (deadlineStr, t) => {
   if (!deadlineStr) return { label: t('no_deadline_set'), color: "text-slate-500" }
-  const now = new Date()
-  const deadlineDate = new Date(deadlineStr)
-  const diffMs = deadlineDate - now
+  const diffMs = msUntil(deadlineStr)
+  if (isNaN(diffMs)) return { label: t('no_deadline_set'), color: "text-slate-500" }
 
   if (diffMs < 0) {
     const overdueHours = Math.abs(diffMs) / (1000 * 60 * 60)
@@ -31,18 +34,7 @@ const getDeadlineStatus = (deadlineStr, t) => {
   return { label: t('days_left', diffDays), color: "text-emerald-400" }
 }
 
-const formatDate = (deadlineStr) => {
-  if (!deadlineStr) return "Not set"
-  const date = new Date(deadlineStr)
-  if (isNaN(date)) return deadlineStr
-  return date.toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-}
-
-const formatDateTime = (isoStr) => {
-  const date = new Date(isoStr)
-  if (isNaN(date)) return isoStr
-  return date.toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })
-}
+// formatDate/formatDateTime now come from utils/datetime (UTC-safe)
 
 const AssignmentDetail = () => {
   const { id } = useParams()
@@ -54,6 +46,9 @@ const AssignmentDetail = () => {
   const [assignment, setAssignment] = useState(() =>
     assignmentsList.find((item) => String(item.id) === String(id)) || null
   )
+  // Quiz answers keyed by question index — only used inside the quiz modal.
+  const [quizAnswers, setQuizAnswers] = useState({})
+  const [quizOpen, setQuizOpen] = useState(false)
   const [loadingDetail, setLoadingDetail] = useState(!assignment)
   const [answer, setAnswer] = useState("")
   const [editing, setEditing] = useState(false)
@@ -68,7 +63,7 @@ const AssignmentDetail = () => {
     let cancelled = false
     setLoadingDetail(true)
     api.get(`/object/${id}`)
-      .then((res) => { if (!cancelled) setAssignment(res.data) })
+      .then((res) => { if (!cancelled) setAssignment(normalizeActivity(res.data)) })
       .catch(() => { if (!cancelled) setAssignment(null) })
       .finally(() => { if (!cancelled) setLoadingDetail(false) })
     return () => { cancelled = true }
@@ -99,22 +94,51 @@ const AssignmentDetail = () => {
   const deadlineStatus = getDeadlineStatus(assignment.deadline, t)
   const mySub = mySubmission(Number(id), user?.email)
   const hasSubmission = Boolean(mySub)
+  const quizQuestions = parseQuestions(assignment)
+  const isQuiz = quizQuestions.length > 0
 
-  const isPastDeadline = assignment.deadline ? new Date(assignment.deadline) < new Date() : false
+  const isPastDeadline = assignment.deadline ? (msUntil(assignment.deadline) < 0) : false
   const isGraded = Boolean(mySub?.grade !== undefined && mySub?.grade !== null && mySub?.grade !== "")
-  const isLocked = isGraded || isPastDeadline
+  // Quiz attempt limit: first take + one retake (MAX_QUIZ_ATTEMPTS total).
+  // Grading the submission also locks it, matching the non-quiz flow.
+  const attemptsUsed = isQuiz ? getQuizAttempts(Number(id), user?.email) : 0
+  const attemptsLeft = Math.max(0, MAX_QUIZ_ATTEMPTS - attemptsUsed)
+  const quizExhausted = isQuiz && attemptsLeft <= 0
+  const isLocked = isGraded || isPastDeadline || quizExhausted
   const lockReason = isGraded
     ? t('lock_reason_graded')
-    : t('lock_reason_deadline')
+    : quizExhausted
+      ? t('quiz_no_attempts')
+      : t('lock_reason_deadline')
 
   const handleSubmit = async (e) => {
     e.preventDefault()
-    if (!answer.trim() || isLocked) return
+    if (isLocked) return
+    if (!answer.trim()) return
     const success = await submitAssignment(Number(id), answer, user?.full_name, user?.email)
     if (success) {
       setAnswer("")
       setEditing(false)
     }
+  }
+
+  // Called by the quiz modal when the student finishes (or time runs out).
+  const handleQuizSubmit = async (answers) => {
+    const payload = buildQuizSubmission(Number(id), answers)
+    const success = await submitAssignment(Number(id), payload, user?.full_name, user?.email)
+    setQuizOpen(false)
+    if (success) {
+      recordQuizAttempt(Number(id), user?.email)
+      setEditing(false)
+    }
+  }
+
+  const startQuiz = () => {
+    if (isQuiz && attemptsLeft <= 0) return
+    // Resume from a previous attempt when retaking.
+    const existing = hasSubmission ? extractQuizAnswers(mySub) : null
+    if (existing) setQuizAnswers(existing)
+    setQuizOpen(true)
   }
 
   return (
@@ -156,7 +180,7 @@ const AssignmentDetail = () => {
               </div>
               <span className="text-slate-500 text-xs">{formatDateTime(mySub.submittedAt)}</span>
             </div>
-            {mySub.text && mySub.text.match(/^https?:\/\//) ? (
+            {mySub.text && mySub.text.match(/^https?:\/\//) && !extractQuizAnswers(mySub) ? (
               <a
                 href={mySub.text}
                 target="_blank"
@@ -165,6 +189,8 @@ const AssignmentDetail = () => {
               >
                 {mySub.text}
               </a>
+            ) : extractQuizAnswers(mySub) ? (
+              <QuizResultBadge questions={quizQuestions} answers={extractQuizAnswers(mySub)} />
             ) : (
               <p className="text-slate-200 whitespace-pre-wrap">{mySub.text}</p>
             )}
@@ -182,16 +208,42 @@ const AssignmentDetail = () => {
               <p className="text-slate-500 text-xs mt-3 italic">{lockReason}</p>
             ) : (
               <>
-                <p className="text-amber-400 text-xs mt-2">{t('editing_clears_grade')}</p>
+                {isQuiz
+                  ? <p className="text-amber-400 text-xs mt-2">{t('quiz_attempts_left', `${attemptsLeft}`)}</p>
+                  : <p className="text-amber-400 text-xs mt-2">{t('editing_clears_grade')}</p>}
                 <button
-                  onClick={() => { setAnswer(mySub.text); setEditing(true) }}
+                  onClick={() => { if (!isQuiz) { setAnswer(mySub.text); setEditing(true) } else startQuiz() }}
                   className="mt-3 px-5 py-2 rounded-xl bg-[#0e1b52] text-white text-sm font-semibold hover:bg-indigo-600 transition-colors cursor-pointer"
                 >
-                  {t('edit_submission_btn')}
+                  {isQuiz ? t('quiz_retake_btn') : t('edit_submission_btn')}
                 </button>
               </>
             )}
           </div>
+        ) : isQuiz ? (
+          isLocked ? (
+            <div className="bg-[#0a1030] border border-red-900/40 rounded-2xl p-6 text-center">
+              <p className="text-red-400 font-semibold mb-1">{t('submission_closed_label')}</p>
+              <p className="text-slate-500 text-sm">{lockReason}</p>
+            </div>
+          ) : (
+            <div className="bg-gradient-to-br from-indigo-950/60 to-purple-950/40 border border-indigo-800/50 rounded-3xl p-8 flex flex-col items-center gap-5 text-center">
+              <span className="w-16 h-16 rounded-2xl bg-indigo-500/15 flex items-center justify-center text-3xl">🧠</span>
+              <div>
+                <h2 className="text-white font-bold text-xl mb-1">{t('quiz_start_title')}</h2>
+                <p className="text-slate-400 text-sm">{t('quiz_start_info', `${quizQuestions.length}`)}</p>
+              </div>
+              <button
+                onClick={startQuiz}
+                className="px-10 py-3 rounded-2xl bg-[#8fd125] text-black font-bold text-sm hover:shadow-lg hover:shadow-[#78af1f]/40 transition-all cursor-pointer"
+              >
+                ▶ {t('quiz_start_btn')}
+              </button>
+              <p className={`text-xs ${attemptsLeft === 1 ? 'text-amber-400' : 'text-slate-600'}`}>
+                {attemptsLeft === 1 ? t('quiz_last_attempt') : t('quiz_timer_hint')}
+              </p>
+            </div>
+          )
         ) : isLocked ? (
           <div className="bg-[#0a1030] border border-red-900/40 rounded-2xl p-6 text-center">
             <p className="text-red-400 font-semibold mb-1">{t('submission_closed_label')}</p>
@@ -231,6 +283,16 @@ const AssignmentDetail = () => {
           </form>
         )}
       </div>
+
+      {quizOpen && (
+        <QuizModal
+          assignment={assignment}
+          initialAnswers={quizAnswers}
+          onClose={() => setQuizOpen(false)}
+          onSubmit={handleQuizSubmit}
+          submitting={submittingId === Number(id)}
+        />
+      )}
     </div>
   )
 }

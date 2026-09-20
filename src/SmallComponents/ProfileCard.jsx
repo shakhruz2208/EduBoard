@@ -2,15 +2,18 @@ import { useState, useRef, useEffect } from 'react'
 import {
   IconPencil, IconCrown, IconMail,
   IconLock, IconLogout, IconX, IconCheck, IconKey, IconCopy
-  , IconTrash
+  , IconTrash, IconArchive
 } from '@tabler/icons-react'
 import { CgSpinner } from 'react-icons/cg'
+import { useNavigate } from 'react-router-dom'
 import { toast } from 'react-toastify'
 import { useAuth, resolveAvatarUrl } from '../Providers/AuthProvider'
 import { useLanguage } from '../Providers/LanguageProvider'
+import { studentCode } from '../utils/studentCode'
 
 const ProfileCard = () => {
   const fileInputRef = useRef()
+  const navigate = useNavigate()
   const { user, logout, uploadAvatar, avatarUploading, updateProfile, profileUpdating, changePassword, passwordUpdating, deleteAccount } = useAuth()
   const { t } = useLanguage()
 
@@ -142,8 +145,8 @@ const ProfileCard = () => {
         </div>
 
         {role === 'student' && (() => {
-          // Show the FULL student_code exactly as backend stores it
-          const displayId = user.student_code || String(user.id)
+          // Deterministic 5-digit code — matches what the teacher list shows
+          const displayId = studentCode(user)
           return (
             <div className="flex items-center gap-2 bg-[#0e1442] border border-indigo-900/40 rounded-xl px-3.5 py-2 mt-1">
               <span className="text-slate-400 text-xs">{t('student_id_label')}:</span>
@@ -297,9 +300,20 @@ const ProfileCard = () => {
         </div>
       )}
 
+      {/* Teacher quick action: lesson archive (kept out of the main nav on purpose) */}
+      {role === 'teacher' && (
+        <button
+          onClick={() => navigate('/teacher-archive')}
+          className="w-full mt-6 sm:mt-7 border border-indigo-500/25 bg-[#0e1442]/60 hover:bg-[#141a55] rounded-xl py-2.5 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+        >
+          <IconArchive size={17} className="text-indigo-300" />
+          <span className="text-sm font-medium text-indigo-200">{t('nav_archive')}</span>
+        </button>
+      )}
+
       <button
         onClick={() => setShowLogoutConfirm(true)}
-        className="w-full mt-6 sm:mt-7 bg-red-700 hover:bg-red-600 rounded-xl py-3 sm:py-3.5 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+        className="w-full mt-3 bg-red-700 hover:bg-red-600 rounded-xl py-3 sm:py-3.5 flex items-center justify-center gap-2 cursor-pointer transition-colors"
       >
         <IconLogout size={18} className="text-white" />
         <span className="text-sm sm:text-base font-medium text-white">{t('logout')}</span>
@@ -314,8 +328,8 @@ const ProfileCard = () => {
       </button>
 
       {showLogoutConfirm && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#14193A] border border-indigo-700/30 rounded-2xl p-5 sm:p-6 max-w-sm w-full">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-[#14193A] border border-indigo-700/30 rounded-2xl p-5 sm:p-6 max-w-sm w-full animate-scale-in">
             <h3 className="text-white text-base sm:text-lg font-medium mb-2">{t('confirm_logout_title')}</h3>
             <p className="text-slate-400 text-sm mb-5">{t('confirm_logout_text')}</p>
             <div className="flex gap-3">
@@ -337,8 +351,8 @@ const ProfileCard = () => {
       )}
 
       {showDeleteConfirm && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-          <div className="bg-[#14193A] border border-red-500/30 rounded-2xl p-5 sm:p-6 max-w-sm w-full shadow-2xl shadow-black/40">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in">
+          <div className="bg-[#14193A] border border-red-500/30 rounded-2xl p-5 sm:p-6 max-w-sm w-full shadow-2xl shadow-black/40 animate-scale-in">
             <div className="flex items-start justify-between gap-3">
               <div>
                 <p className="text-xs uppercase tracking-widest font-bold text-red-300">{t('delete_account')}</p>

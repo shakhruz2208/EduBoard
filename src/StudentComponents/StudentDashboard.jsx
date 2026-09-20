@@ -1,20 +1,23 @@
-import { useMemo, useState, useEffect } from "react"
+import { useMemo, useState, useEffect, useRef } from "react"
 import { useNavigate } from "react-router-dom"
 import { HiOutlineBookOpen, HiOutlineClipboardList } from "react-icons/hi"
 import { FaRegStar } from "react-icons/fa"
 import { IoChevronForward } from "react-icons/io5"
 import { BiCalendar } from "react-icons/bi"
+import { toast } from "react-toastify"
 import { useAssignments } from "../Providers/AssignmentProvider"
 import { useAuth } from "../Providers/AuthProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
 import { useCourses } from "../Providers/CourseProvider"
+import { normalizeActivityList } from "../utils/backend"
+import { msUntil, formatDate as formatDateUtil } from "../utils/datetime"
+import { startDeadlineWatcher } from "../utils/reminders"
 import api from "../api"
 
 const getDeadlineStatus = (deadlineStr, t) => {
   if (!deadlineStr) return { label: t('not_set'), color: "text-slate-500" }
-  const now = new Date()
-  const deadlineDate = new Date(deadlineStr)
-  const diffMs = deadlineDate - now
+  const diffMs = msUntil(deadlineStr)
+  if (isNaN(diffMs)) return { label: t('not_set'), color: "text-slate-500" }
 
   if (diffMs < 0) {
     const overdueHours = Math.abs(diffMs) / (1000 * 60 * 60)
@@ -35,9 +38,7 @@ const getDeadlineStatus = (deadlineStr, t) => {
 
 const formatDate = (deadlineStr, t) => {
   if (!deadlineStr) return t('not_set')
-  const date = new Date(deadlineStr)
-  if (isNaN(date)) return deadlineStr
-  return date.toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+  return formatDateUtil(deadlineStr)
 }
 
 const StudentDashboard = () => {
@@ -53,22 +54,25 @@ const StudentDashboard = () => {
   // Fetch lesson activities (homework from lessons)
   useEffect(() => {
     let cancelled = false
-    const enrolledCourses = myGroup ? [myGroup] : courses
-    if (!enrolledCourses.length) {
-      console.log('[StudentDashboard] No enrolled courses found. myGroup:', myGroup, 'courses:', courses)
-      return
-    }
+    // Union of /me/group and /me/groups: a student can appear in only one of
+    // the two responses, so combining them guarantees full lesson coverage.
+    const enrolledCourses = [...(courses || [])]
+    if (myGroup && !enrolledCourses.some((c) => c.id === myGroup.id)) enrolledCourses.push(myGroup)
+    if (!enrolledCourses.length) return
 
     Promise.allSettled(enrolledCourses.map((course) => api.get(`/groups/${course.id}/lessons`)))
       .then(async (results) => {
         if (cancelled) return
         const lessons = []
         const lessonCourseMap = {}
+        const seenLessonIds = new Set()
         results.forEach((result, courseIndex) => {
           if (result.status !== 'fulfilled') return
           const data = result.value.data
           const items = Array.isArray(data) ? data : data?.items || []
           items.forEach((lesson) => {
+            if (seenLessonIds.has(lesson.id)) return
+            seenLessonIds.add(lesson.id)
             lessons.push(lesson)
             lessonCourseMap[lesson.id] = { name: enrolledCourses[courseIndex]?.name, id: enrolledCourses[courseIndex]?.id }
           })
@@ -79,22 +83,23 @@ const StudentDashboard = () => {
         )
 
         const activitiesArr = []
+        const seenActivityIds = new Set()
         activityResults.forEach((result, index) => {
           if (result.status !== 'fulfilled' || !lessons[index]) return
-          const data = result.value.data
-          const items = Array.isArray(data) ? data : data?.items || []
           const lesson = lessons[index]
-          items.forEach((activity) => {
+          const courseInfo = lessonCourseMap[lesson.id] || {}
+          // Backend may return activity_type or kind — normalize in one place
+          normalizeActivityList(result.value.data, {
+            lessonId: lesson.id,
+            courseId: courseInfo.id,
+            courseName: courseInfo.name
+          }).forEach((activity) => {
+            if (seenActivityIds.has(activity.id)) return
+            seenActivityIds.add(activity.id)
             activitiesArr.push({
               ...activity,
-              id: activity.id || activity._id || activity.homework_id || `activity-${lesson.id}-${Math.random()}`,
-              name: activity.title || activity.name,
-              description: activity.description,
-              group_id: lessonCourseMap[lesson.id]?.id,
-              group: { name: lessonCourseMap[lesson.id]?.name },
-              deadline: activity.content?.deadline || activity.deadline,
-              isActivity: true,
-              activityType: activity.kind || 'homework'
+              group_id: courseInfo.id,
+              group: { name: courseInfo.name }
             })
           })
         })
@@ -110,34 +115,35 @@ const StudentDashboard = () => {
 
   const hasMySubmission = (item) => Boolean(item.submitted || mySubmission(item.id, user?.email))
 
-  // Debug: log data to help diagnose visibility issues
+  // Deadline reminders: every 5 minutes check pending work and toast when a
+  // deadline is within 24h (and again within 1h). Each threshold fires once.
+  // Latest values are read through a ref so the interval is started once.
+  const deadlineDeps = useRef({})
+  deadlineDeps.current = { assignmentsList, lessonActivities, mySubmission, user, t }
   useEffect(() => {
-    console.log('[StudentDashboard] Debug info:', {
-      assignmentsCount: assignmentsList.length,
-      assignments: assignmentsList.map(a => ({ id: a.id, name: a.name, group_id: a.group_id })),
-      coursesCount: courses.length,
-      courses: courses.map(c => ({ id: c.id, name: c.name })),
-      myGroup: myGroup ? { id: myGroup.id, name: myGroup.name } : null,
-      myGroupId: myGroup?.id,
-      enrolledGroupIds: courses.map(c => String(c.id)),
-      lessonActivitiesCount: lessonActivities.length
-    })
-  }, [assignmentsList, courses, myGroup, lessonActivities])
+    const stop = startDeadlineWatcher(
+      () => { const d = deadlineDeps.current; return [...d.assignmentsList, ...d.lessonActivities] },
+      (item) => { const d = deadlineDeps.current; return Boolean(item.submitted || d.mySubmission(item.id, d.user?.email)) },
+      (item, label) => { const d = deadlineDeps.current; toast.warn(`${item.name || item.title}: ${d.t('deadline_reminder', label)}`) }
+    )
+    return stop
+  }, [])
 
-  // Only assignments belonging to the course the student was actually added
-  // to — even if the backend ever returns everyone's objects, this guarantees
+  // Only assignments belonging to courses the student was actually added to
+  // — even if the backend ever returns everyone's objects, this guarantees
   // a student never sees another course's homework.
   const courseOptions = useMemo(() => {
     const knownCourses = [...(courses || [])]
     if (myGroup && !knownCourses.some((course) => course.id === myGroup.id)) {
       knownCourses.push(myGroup)
     }
-    // Consider both regular assignments AND lesson activities
+    // Consider regular assignments AND lesson activities. If nothing carries
+    // a group/course id yet, fall back to showing every enrolled course.
     const assignmentGroupIds = new Set([
       ...assignmentsList.map((item) => String(item.group_id)),
-      ...lessonActivities.map((item) => String(item.group_id))
+      ...lessonActivities.map((item) => String(item.group_id ?? item.courseId ?? ''))
     ])
-    // If no group_ids found, show all enrolled courses
+    assignmentGroupIds.delete('')
     if (assignmentGroupIds.size === 0) return knownCourses
     return knownCourses.filter((course) => assignmentGroupIds.has(String(course.id)))
   }, [assignmentsList, lessonActivities, courses, myGroup])
@@ -145,14 +151,45 @@ const StudentDashboard = () => {
   const myGroupAssignments = useMemo(
     () => {
       const enrolledGroupIds = new Set(courseOptions.map((course) => String(course.id)))
-      const regularAssignments = assignmentsList.filter((item) => (
-        enrolledGroupIds.has(String(item.group_id)) &&
-        (courseFilter === "all" || String(item.group_id) === String(courseFilter))
-      ))
-      const filteredActivities = lessonActivities.filter((item) => (
-        courseFilter === "all" || String(item.group_id) === String(courseFilter)
-      ))
-      return [...regularAssignments, ...filteredActivities]
+      const inCourse = (item) => (
+        enrolledGroupIds.has(String(item.group_id)) ||
+        (item.courseId != null && enrolledGroupIds.has(String(item.courseId)))
+      )
+      const matchesFilter = (item) => (
+        courseFilter === "all" ||
+        String(item.group_id) === String(courseFilter) ||
+        String(item.courseId) === String(courseFilter)
+      )
+
+      // Gradable activities arrive twice: as a lesson activity AND as its
+      // mirror object (content.object_id). Show them ONCE through the object
+      // — enriched with the activity's metadata — so submissions keep working
+      // against /object/{id}/submit.
+      const activityByObjectId = new Map()
+      const standaloneActivities = []
+      lessonActivities.forEach((act) => {
+        if (!inCourse(act) || !matchesFilter(act)) return
+        if (act.objectId != null) activityByObjectId.set(String(act.objectId), act)
+        else standaloneActivities.push(act)
+      })
+
+      const regularAssignments = []
+      assignmentsList.forEach((item) => {
+        if (!inCourse(item) || !matchesFilter(item)) return
+        const act = activityByObjectId.get(String(item.id))
+        regularAssignments.push(act
+          ? {
+              ...item,
+              name: item.name || act.title,
+              description: item.description || act.description,
+              deadline: item.deadline || act.deadline,
+              kind: act.kind,
+              isActivity: true,
+            }
+          : item)
+      })
+
+      return [...regularAssignments, ...standaloneActivities]
     },
     [assignmentsList, lessonActivities, courseFilter, courseOptions]
   )
@@ -250,12 +287,15 @@ const StudentDashboard = () => {
               const deadlineStatus = getDeadlineStatus(item.deadline, t)
               const mySub = mySubmission(item.id, user?.email)
               const isGraded = mySub && mySub.grade !== undefined && mySub.grade !== null && mySub.grade !== ""
+              // Materials (and legacy kind:"activity" rows) have no submit
+              // route — render them as read-only cards.
+              const isReadOnlyMaterial = item.isActivity && (item.kind === "materials" || item.kind === "activity")
 
               return (
                 <div
                   key={item.id}
-                  onClick={() => navigate(`/assignment/${item.id}`)}
-                  className="bg-[#0a1030] border border-indigo-900/40 rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-indigo-500/40 transition-colors cursor-pointer"
+                  onClick={() => { if (!isReadOnlyMaterial) navigate(`/assignment/${item.objectId || item.id}`) }}
+                  className={`bg-[#0a1030] border border-indigo-900/40 rounded-2xl p-5 flex items-center justify-between gap-4 hover:border-indigo-500/40 transition-colors ${isReadOnlyMaterial ? "" : "cursor-pointer"}`}
                 >
                   <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -265,31 +305,56 @@ const StudentDashboard = () => {
                           {item.group.name}
                         </span>
                       )}
+                      {item.isActivity && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-300 shrink-0">
+                          {t(`activity_${item.kind}`)}
+                        </span>
+                      )}
                       {mySub?.late && (
                         <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-400 shrink-0">
                           {t('late_badge')}
                         </span>
                       )}
                     </div>
+                    {isReadOnlyMaterial && item.description && (
+                      <p className="text-slate-400 text-xs mt-1 truncate">{item.description}</p>
+                    )}
                   </div>
 
                   <div className="flex items-center gap-3 sm:gap-5 shrink-0">
-                    <div className="text-right hidden sm:block">
-                      <p className="text-[10px] tracking-wider text-indigo-400 font-semibold flex items-center justify-end gap-1">
-                        <BiCalendar /> {formatDate(item.deadline, t)}
-                      </p>
-                      <p className={`text-sm font-medium ${deadlineStatus.color}`}>{deadlineStatus.label}</p>
-                    </div>
-
-                    {isGraded ? (
-                      <span className="text-xs font-bold hidden sm:inline text-emerald-400">{mySub.grade}/100</span>
+                    {isReadOnlyMaterial ? (
+                      item.url ? (
+                        <a
+                          href={item.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-xs font-bold text-indigo-300 hover:text-indigo-200 underline"
+                        >
+                          {t('open_link')}
+                        </a>
+                      ) : (
+                        <span className="text-xs text-slate-500">{t('materials_hint')}</span>
+                      )
                     ) : (
-                      <span className={`text-xs font-semibold hidden sm:inline ${hasMySubmission(item) ? "text-emerald-400" : "text-slate-500"}`}>
-                        {hasMySubmission(item) ? t('submitted') : t('not_submitted')}
-                      </span>
-                    )}
+                      <>
+                        <div className="text-right hidden sm:block">
+                          <p className="text-[10px] tracking-wider text-indigo-400 font-semibold flex items-center justify-end gap-1">
+                            <BiCalendar /> {formatDate(item.deadline, t)}
+                          </p>
+                          <p className={`text-sm font-medium ${deadlineStatus.color}`}>{deadlineStatus.label}</p>
+                        </div>
 
-                    <IoChevronForward className="text-indigo-400" />
+                        {isGraded ? (
+                          <span className="text-xs font-bold hidden sm:inline text-emerald-400">{mySub.grade}/100</span>
+                        ) : (
+                          <span className={`text-xs font-semibold hidden sm:inline ${hasMySubmission(item) ? "text-emerald-400" : "text-slate-500"}`}>
+                            {hasMySubmission(item) ? t('submitted') : t('not_submitted')}
+                          </span>
+                        )}
+                        <IoChevronForward className="text-indigo-400" />
+                      </>
+                    )}
                   </div>
                 </div>
               )

@@ -1,8 +1,9 @@
 import { NavLink } from "react-router-dom"
 import { useState } from "react"
-import { IconMenu2, IconX } from "@tabler/icons-react"
+import { IconMenu2, IconX, IconSun, IconMoonStars } from "@tabler/icons-react"
 import { useAuth, resolveAvatarUrl } from "../Providers/AuthProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
+import { useTheme } from "../Providers/ThemeProvider"
 import NotificationBell from "./NotificationBell"
 import LanguageSwitcher from "../components/LanguageSwitcher"
 
@@ -22,6 +23,7 @@ const AvatarCircle = ({ avatarUrl, avatarLetter, role }) => (
 const Header = () => {
     const { user } = useAuth()
     const { t } = useLanguage()
+    const { isLight, toggleTheme } = useTheme()
     const [menuOpen, setMenuOpen] = useState(false)
 
     const role = user?.teacher ? 'teacher' : 'student'
@@ -30,6 +32,7 @@ const Header = () => {
     const teacherLinks = [
         { name: t('nav_assignments'), path: '/teacher-dashboard' },
         { name: t('nav_students'), path: '/teacher-students' },
+        { name: t('nav_rating'), path: '/teacher-rating' },
         { name: t('nav_grades'), path: '/teacher-grades' }
     ]
     const studentLinks = [
@@ -62,6 +65,14 @@ const Header = () => {
                 </div>
 
                 <div className="flex items-center gap-2 sm:gap-3 lg:gap-4 shrink-0">
+                    <button
+                        onClick={toggleTheme}
+                        aria-label={isLight ? 'Dark mode' : 'Light mode'}
+                        title={isLight ? 'Dark mode' : 'Light mode'}
+                        className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center text-white bg-white/10 hover:bg-white/20 border border-white/10 transition-all hover:scale-105 active:scale-95 cursor-pointer"
+                    >
+                        {isLight ? <IconMoonStars size={19} /> : <IconSun size={19} />}
+                    </button>
                     <LanguageSwitcher />
                     <NotificationBell />
                     <AvatarCircle avatarUrl={avatarUrl} avatarLetter={avatarLetter} role={role} />

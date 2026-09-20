@@ -1,7 +1,9 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import api from "../api"
 import { toast } from "react-toastify"
 import { useAuth } from "./AuthProvider"
+import { msUntil } from "../utils/datetime"
+import { normalizeActivity } from "../utils/backend"
 
 const AssignmentContext = createContext(null)
 
@@ -38,20 +40,14 @@ export const AssignmentProvider = ({ children }) => {
         ? [api.get('/objects'), api.get('/teacher/homework')]
         : [api.get('/objects'), api.get('/homework'), api.get('/me/homework')])
 
-      console.log('[AssignmentProvider] fetchAll results:', {
-        isTeacher,
-        resultsStatus: results.map((r, i) => ({ index: i, status: r.status })),
-        objectsData: results[0].status === 'fulfilled' ? results[0].value.data : results[0].reason?.message,
-        homeworkData: results[1].status === 'fulfilled' ? results[1].value.data : results[1].reason?.message,
-        meHomeworkData: !isTeacher && results[2] ? (results[2].status === 'fulfilled' ? results[2].value.data : results[2].reason?.message) : 'N/A'
-      })
-
       if (results[0].status === "fulfilled") {
         const data = results[0].value.data
         const assignments = Array.isArray(data) ? data : data?.items
-        const assignmentsList = Array.isArray(assignments) ? assignments : []
+        // Normalize every row so quiz markers are stripped and questions exposed.
+        const assignmentsList = (Array.isArray(assignments) ? assignments : [])
+          .map((item) => normalizeActivity(item))
+          .filter(Boolean)
         setAssignmentsList(assignmentsList)
-        console.log('[AssignmentProvider] assignmentsList:', assignmentsList.map(a => ({ id: a.id, name: a.name, group_id: a.group_id })))
       } else {
         console.error("❌ Error fetching assignments", results[0].reason)
       }
@@ -82,7 +78,16 @@ export const AssignmentProvider = ({ children }) => {
               return normalizeSubmission(item, student?.email, student?.full_name)
             }))
           } else {
-            const normalized = homework.map((item) => normalizeSubmission(item, user?.email, user?.full_name))
+            // /me/homework and /homework can return the same submission twice —
+            // dedupe by submission id before normalizing.
+            const seenSubs = new Set()
+            const uniqueHomework = homework.filter((item) => {
+              const key = String(item.id ?? `${item.object_id}:${item.student_id}`)
+              if (seenSubs.has(key)) return false
+              seenSubs.add(key)
+              return true
+            })
+            const normalized = uniqueHomework.map((item) => normalizeSubmission(item, user?.email, user?.full_name))
             const submittedIds = new Set(normalized.map((item) => String(item.assignmentId)))
             const objectsData = results[0].status === "fulfilled"
               ? (Array.isArray(results[0].value.data) ? results[0].value.data : results[0].value.data?.items)
@@ -91,7 +96,11 @@ export const AssignmentProvider = ({ children }) => {
             const aliasData = aliasResult.status === "fulfilled" ? aliasResult.value.data : []
             const aliasItems = Array.isArray(aliasData) ? aliasData : aliasData?.items || []
             const nestedAssignments = aliasItems.map((item) => item.homework).filter(Boolean)
-            const assignmentsById = new Map([...(objectsData || []), ...nestedAssignments].map((item) => [String(item.id), item]))
+            const assignmentsById = new Map()
+            ;[...(objectsData || []), ...nestedAssignments].forEach((item) => {
+              const normalized = normalizeActivity(item)
+              if (normalized) assignmentsById.set(String(normalized.id), normalized)
+            })
             setAssignmentsList([...assignmentsById.values()].map((item) => (
               submittedIds.has(String(item.id)) ? { ...item, submitted: true } : item
             )))
@@ -116,6 +125,42 @@ export const AssignmentProvider = ({ children }) => {
       setSubmissions([])
     }
   }, [isAuth, fetchAll])
+
+  // Detect assignments that arrived after the previous fetch and toast each
+  // one from the top of the screen. First-ever fetch stays silent.
+  const knownIdsRef = useRef(null)
+  const fetchAndToastNew = useCallback(async () => {
+    try {
+      const res = await api.get('/objects')
+      const data = res.data
+      const rows = (Array.isArray(data) ? data : data?.items || [])
+        .map((item) => normalizeActivity(item))
+        .filter(Boolean)
+      const ids = new Set(rows.map((item) => String(item.id)))
+      if (knownIdsRef.current) {
+        rows.forEach((item) => {
+          if (!knownIdsRef.current.has(String(item.id))) {
+            toast.info(`📄 ${item.name}`, {
+              toastId: `new-assignment-${item.id}`,
+              autoClose: 6000,
+            })
+          }
+        })
+      }
+      knownIdsRef.current = ids
+      setAssignmentsList((prev) => {
+        const prevById = new Map(prev.map((item) => [String(item.id), item]))
+        return rows.map((item) => prevById.get(String(item.id))?.submitted ? { ...item, submitted: true } : item)
+      })
+    } catch { /* silent — poll only enhances the base fetch */ }
+  }, [])
+
+  useEffect(() => {
+    if (!isAuth) { knownIdsRef.current = null; return undefined }
+    fetchAndToastNew()
+    const interval = setInterval(fetchAndToastNew, 30000)
+    return () => clearInterval(interval)
+  }, [isAuth, fetchAndToastNew])
 
   const addAssignment = async (name, description, deadline, groupId) => {
     if (!name.trim() || !groupId) return false
@@ -170,12 +215,17 @@ export const AssignmentProvider = ({ children }) => {
     const submissionUrl = text.trim()
     if (!submissionUrl) return false
 
-    try {
-      const parsedUrl = new URL(submissionUrl)
-      if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Unsupported URL protocol')
-    } catch {
-      toast.error('Please enter a valid link starting with https://')
-      return false
+    // Quiz submissions carry an answers payload inside an https wrapper URL
+    // (quiz.local is never fetched — it just satisfies backend validation);
+    // everything else must be a real http(s) URL.
+    if (!submissionUrl.startsWith('https://quiz.local/') && !submissionUrl.startsWith('quiz://')) {
+      try {
+        const parsedUrl = new URL(submissionUrl)
+        if (!['http:', 'https:'].includes(parsedUrl.protocol)) throw new Error('Unsupported URL protocol')
+      } catch {
+        toast.error('Please enter a valid link starting with https://')
+        return false
+      }
     }
 
     try {
@@ -183,7 +233,7 @@ export const AssignmentProvider = ({ children }) => {
 
       const res = await api.post(`/object/${assignmentId}/submit`, { url: submissionUrl })
       const assignment = assignmentsList.find((a) => a.id === assignmentId)
-      const isLate = assignment?.deadline ? new Date() > new Date(assignment.deadline) : false
+      const isLate = assignment?.deadline ? msUntil(assignment.deadline) < 0 : false
       setAssignmentsList((prev) => prev.map((item) => (
         item.id === assignmentId
           ? { ...item, submitted: true, homework_url: res.data.url }

@@ -1,3 +1,4 @@
+
 import { useEffect, useState, useCallback } from 'react'
 import { CgSpinner } from 'react-icons/cg'
 import { IoAdd, IoBookOutline } from 'react-icons/io5'
@@ -5,6 +6,8 @@ import { toast } from 'react-toastify'
 import api from '../api'
 import { useCourses } from '../Providers/CourseProvider'
 import { useLanguage } from '../Providers/LanguageProvider'
+import { normalizeActivityList } from '../utils/backend'
+import { createActivity, notifyGroupAssignment } from '../utils/activities'
 
 const TeacherLessons = () => {
   const { courses, groupMembers, fetchGroupMembers } = useCourses()
@@ -50,8 +53,8 @@ const TeacherLessons = () => {
     setSelectedLesson(lesson)
     try {
       const response = await api.get(`/lessons/${lesson.id}/activities`)
-      const data = response.data
-      const activities = Array.isArray(data) ? data : data?.items || []
+      // Backend may return activity_type or kind — normalize in one place
+      const activities = normalizeActivityList(response.data, { lessonId: lesson.id })
       setActivities(activities)
     } catch (error) {
       console.error(`❌ Error loading activities for lesson ${lesson.id}:`, error?.response?.data)
@@ -89,16 +92,24 @@ const TeacherLessons = () => {
     if (!selectedLesson || !activityTitle.trim()) return
     try {
       setSaving(true)
-      const payload = {
+      // Shared service: gradable kinds are mirrored into a real object so
+      // students actually receive the assignment and can submit against it.
+      const created = await createActivity({
+        lessonId: selectedLesson.id,
+        kind: activityKind,
         title: activityTitle.trim(),
         description: activityDescription.trim() || null,
-        url: null,
-        content: activityDeadline ? { deadline: activityDeadline } : null
-      }
-      const response = await api.post(`/lessons/${selectedLesson.id}/${activityKind}`, payload)
-      setActivities((previous) => [...previous, response.data])
+        deadline: activityDeadline || null,
+        courseName: courses.find((c) => String(c.id) === String(selectedCourse))?.name || '',
+        courseId: selectedCourse,
+      })
+      setActivities((previous) => [...previous, created])
       setActivityTitle(''); setActivityDescription(''); setActivityDeadline('')
       toast.success(t('activity_saved'))
+      // Tell the whole course about the new assignment — non-fatal.
+      if (created.objectId && selectedCourse) {
+        notifyGroupAssignment(selectedCourse, created.title, created.kind)
+      }
     } catch (error) {
       console.error('❌ Error adding activity:', {
         message: error?.message,

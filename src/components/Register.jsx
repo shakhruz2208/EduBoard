@@ -2,7 +2,7 @@ import { FaEnvelope, FaLock, FaUser, FaKey } from "react-icons/fa"
 import { Link, useNavigate } from "react-router-dom"
 import RoleToggle from "../SmallComponents/RoleToggle"
 import MatrixBg from "../SmallComponents/MatrixBg"
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { useAuth } from "../Providers/AuthProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
 
@@ -20,6 +20,9 @@ const Register = () => {
   });
 
   const [submitting, setSubmitting] = useState(false)
+  // Ref guard: state updates are async, so two rapid Enter presses could both
+  // pass the `submitting` check before a re-render. This blocks double-submit.
+  const submittingRef = useRef(false)
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -32,12 +35,15 @@ const Register = () => {
 
   const handleRegister = async (e) => {
     e.preventDefault();
+    if (submittingRef.current) return
+    submittingRef.current = true
     setSubmitting(true)
 
     const success = registerData.role === 'teacher'
-      ? await registerTeacher(registerData.fullName, registerData.email, registerData.password, registerData.secretCode)
-      : await registerStudent(registerData.fullName, registerData.email, registerData.password)
+      ? await registerTeacher(registerData.fullName.trim(), registerData.email.trim(), registerData.password, registerData.secretCode.trim())
+      : await registerStudent(registerData.fullName.trim(), registerData.email.trim(), registerData.password)
 
+    submittingRef.current = false
     setSubmitting(false)
     if (success) {
       navigate(registerData.role === 'teacher' ? '/teacher-dashboard' : '/student-dashboard', { replace: true })
@@ -132,9 +138,13 @@ const Register = () => {
                     value={registerData.secretCode}
                     onChange={handleChange}
                     placeholder={t('secret_code_label')}
+                    minLength={6}
+                    maxLength={6}
                     className="w-full bg-[#030712] text-slate-300 placeholder-slate-600 text-sm pl-11 pr-4 py-3.5 rounded-xl border border-red-900/50 focus:outline-none focus:border-red-500 transition-colors"
+                    required
                   />
                 </div>
+                <p className="text-[11px] text-slate-500">{t('secret_code_hint')}</p>
               </div>
             )}
 

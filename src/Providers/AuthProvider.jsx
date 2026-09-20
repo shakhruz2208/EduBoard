@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
 import axios from "axios"
 import api, { BASE_URL } from "../api"
+import { studentCode } from "../utils/studentCode"
 import { toast } from "react-toastify"
 
 const AuthContext = createContext(null)
@@ -32,15 +33,10 @@ export const AuthProvider = ({ children }) => {
     try {
       const res = await api.get('/me')
       const userData = res.data
-      // If backend doesn't have student_code, use localStorage fallback
+      // Older accounts have no student_code: derive a deterministic 5-digit
+      // code so profile and teacher list always show the same number.
       if (!userData.student_code && !userData.teacher) {
-        const storageKey = `student_code_${userData.id}`
-        let code = localStorage.getItem(storageKey)
-        if (!code) {
-          code = String(Math.floor(10000 + Math.random() * 90000))
-          localStorage.setItem(storageKey, code)
-        }
-        userData.student_code = code
+        userData.student_code = studentCode(userData)
       }
       setUser(userData)
       setIsAuth(true)
@@ -115,24 +111,38 @@ export const AuthProvider = ({ children }) => {
     return false
   }
 
-  // Format backend user ID as 5 digits with leading zeros
-  const formatStudentId = (id) => String(id).padStart(5, '0')
+  // One-off dropped connections (ERR_CONNECTION_CLOSED / net error) happen against
+  // Render — retry a couple of times before giving up, same as login.
+  const postWithRetry = async (url, payload, retries = 2) => {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await api.post(url, payload)
+      } catch (error) {
+        const isNetworkError = !error.response || error.code === 'ECONNABORTED'
+        if (isNetworkError && attempt < retries) {
+          await new Promise((r) => setTimeout(r, 5000))
+          continue
+        }
+        throw error
+      }
+    }
+  }
 
   const registerStudent = async (full_name, email, password) => {
     try {
-      await api.post('/register', { full_name, email, password })
+      await postWithRetry('/register', { full_name, email, password })
       return await login(email, password)
     } catch (error) {
       console.error('Register error:', error?.response?.data || error.message)
-      if (isDuplicateEmailError(error)) {
+      if (error?.response?.status === 409) {
+        // Email already exists — never auto-login here. The user must go
+        // through the login page explicitly, otherwise re-registering an
+        // existing account silently signs them in.
         toast.error("Error: This email is already registered. Please log in instead.")
+      } else if (!error.response) {
+        toast.error("Error: Could not reach the server. Check your connection and try again.")
       } else {
-        const detail = error?.response?.data?.detail
-        let msg = 'Registration failed'
-        if (typeof detail === 'string') msg = detail
-        else if (Array.isArray(detail)) msg = detail.map(d => d.msg).join(', ')
-        else if (detail) msg = JSON.stringify(detail)
-        toast.error(msg || 'Registration failed. Please try again.')
+        toast.error(extractErrorMessage(error, "Error: Registration failed. Please try again."))
       }
       return false
     }
@@ -140,11 +150,15 @@ export const AuthProvider = ({ children }) => {
 
   const registerTeacher = async (full_name, email, password, teacher_secret_code) => {
     try {
-      await api.post('/register-teacher', { full_name, email, password, teacher_secret_code })
+      await postWithRetry('/register-teacher', { full_name, email, password, teacher_secret_code })
       return await login(email, password)
     } catch (error) {
-      if (isDuplicateEmailError(error)) {
+      if (error?.response?.status === 409) {
+        // Same rule as student register: duplicate email must never sign the
+        // user in — they already have an account and should log in instead.
         toast.error("Error: This email is already registered. Please log in instead.")
+      } else if (!error.response) {
+        toast.error("Error: Could not reach the server. Check your connection and try again.")
       } else {
         toast.error(extractErrorMessage(error, "Error: Registration failed. Check your secret code and try again."))
       }
@@ -199,8 +213,11 @@ export const AuthProvider = ({ children }) => {
   const changePassword = async (currentPassword, newPassword) => {
     try {
       setPasswordUpdating(true)
+      // Backend expects current_password; older deployments used old_password —
+      // send both so the request works against either version.
       const res = await api.post('/users/me/password', {
         current_password: currentPassword,
+        old_password: currentPassword,
         new_password: newPassword
       })
       setUser(res.data)

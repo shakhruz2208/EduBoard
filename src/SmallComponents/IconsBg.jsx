@@ -43,7 +43,7 @@ const IconsBg = () => {
       style={{
         position: 'fixed', top: 0, left: 0,
         width: '100%', height: '100%',
-        background: '#0D1B4B', zIndex: 0,
+        background: 'var(--c-icons-bg, #0D1B4B)', zIndex: 0,
         overflow: 'hidden', pointerEvents: 'none',
       }}
     >

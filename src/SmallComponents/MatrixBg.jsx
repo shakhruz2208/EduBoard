@@ -36,7 +36,7 @@ const MatrixBg = () => {
   return (
     <canvas
       ref={canvasRef}
-      style={{ position: 'fixed', top: 0, left: 0, zIndex: -1, background: '#0D1B4B' }}
+      style={{ position: 'fixed', top: 0, left: 0, zIndex: -1, background: 'var(--c-icons-bg, #0D1B4B)' }}
     />
   )
 }

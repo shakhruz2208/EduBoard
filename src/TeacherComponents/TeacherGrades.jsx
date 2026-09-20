@@ -6,6 +6,9 @@ import { CgSpinner } from "react-icons/cg"
 import { useAssignments } from "../Providers/AssignmentProvider"
 import { useCourses } from "../Providers/CourseProvider"
 import { useLanguage } from "../Providers/LanguageProvider"
+import { parseServerDate } from "../utils/datetime"
+import { toCsv, downloadCsv } from "../utils/csv"
+import { toast } from "react-toastify"
 
 const PAGE_SIZE = 10
 
@@ -91,11 +94,11 @@ const TeacherGrades = () => {
     } else if (sortBy === "date") {
       copy.sort((a, b) => {
         const latestA = a.submissions.reduce(
-          (max, s) => Math.max(max, new Date(s.submittedAt || 0).getTime()),
+          (max, s) => Math.max(max, parseServerDate(s.submittedAt || 0)?.getTime() ?? 0),
           0
         )
         const latestB = b.submissions.reduce(
-          (max, s) => Math.max(max, new Date(s.submittedAt || 0).getTime()),
+          (max, s) => Math.max(max, parseServerDate(s.submittedAt || 0)?.getTime() ?? 0),
           0
         )
         return latestB - latestA
@@ -130,6 +133,26 @@ const TeacherGrades = () => {
     return "text-red-400"
   }
 
+  // One row per submission — full grade book dump for Excel.
+  const exportCsv = () => {
+    if (submissions.length === 0) {
+      toast.error(t("export_no_data"))
+      return
+    }
+    const headers = [t("student_label"), "Email", t("assignment_label"), "Grade", "Late", "Submitted at", "Feedback"]
+    const rows = submissions.map((s) => [
+      s.studentName || `Student #${s.studentId}`,
+      s.studentEmail || "",
+      assignmentsList.find((a) => String(a.id) === String(s.assignmentId))?.name || s.assignmentId,
+      s.grade ?? "",
+      s.late ? "yes" : "no",
+      s.submittedAt ? new Date(parseServerDate(s.submittedAt)).toLocaleString() : "",
+      s.feedback || "",
+    ])
+    downloadCsv(`grades_${new Date().toISOString().slice(0, 10)}.csv`, toCsv(headers, rows))
+    toast.success(t("export_done"))
+  }
+
   return (
     <div className="min-h-screen w-full bg-[#03071e] text-white px-5 py-6 sm:px-10 sm:py-8">
       <div className="max-w-6xl mx-auto">
@@ -143,6 +166,12 @@ const TeacherGrades = () => {
           <p className="text-indigo-300 mt-2 max-w-2xl">
             {t('view_manage_grades')}
           </p>
+          <button
+            onClick={exportCsv}
+            className="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-[#0e1b52] border border-indigo-500/40 text-indigo-200 text-sm font-semibold hover:bg-indigo-600 transition-colors cursor-pointer"
+          >
+            ⬇ {t("export_csv")}
+          </button>
         </div>
 
         {/* Stats */}
