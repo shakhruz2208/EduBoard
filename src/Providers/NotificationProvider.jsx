@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import api from "../api"
 import { toast } from "react-toastify"
 import { useAuth } from "./AuthProvider"
@@ -68,7 +68,7 @@ export const NotificationProvider = ({ children }) => {
     return typeof detail === 'string' ? detail : null
   }
 
-  const markAsRead = async (notificationId, isRead = true) => {
+  const markAsRead = useCallback(async (notificationId, isRead = true) => {
     const key = `patch:${notificationId}:${isRead}`
     if (pendingRef.current.has(key)) return false
     pendingRef.current.add(key)
@@ -86,10 +86,10 @@ export const NotificationProvider = ({ children }) => {
     } finally {
       pendingRef.current.delete(`patch:${notificationId}:${isRead}`)
     }
-  }
+  }, [fetchAll])
 
   // Mark every currently-unread notification as read (used when opening the bell)
-  const markAllRead = async () => {
+  const markAllRead = useCallback(async () => {
     const unread = notifications.filter((n) => !n.is_read)
     if (unread.length === 0) return
     // Deduplicate concurrent markAllRead calls for the same notification
@@ -113,9 +113,9 @@ export const NotificationProvider = ({ children }) => {
     } finally {
       fresh.forEach((n) => pendingRef.current.delete(`patch:${n.id}:true`))
     }
-  }
+  }, [notifications, fetchAll])
 
-  const deleteNotification = async (notificationId) => {
+  const deleteNotification = useCallback(async (notificationId) => {
     const key = `delete:${notificationId}`
     if (pendingRef.current.has(key)) return false
     pendingRef.current.add(key)
@@ -133,9 +133,9 @@ export const NotificationProvider = ({ children }) => {
     } finally {
       pendingRef.current.delete(key)
     }
-  }
+  }, [fetchAll, fetchUnreadCount])
 
-  const clearAll = async () => {
+  const clearAll = useCallback(async () => {
     try {
       await api.delete('/notifications')
       setNotifications([])
@@ -147,10 +147,10 @@ export const NotificationProvider = ({ children }) => {
       fetchAll()
       return false
     }
-  }
+  }, [fetchAll])
 
   // Teacher/admin only — notifies specific users directly (POST /notifications)
-  const notifyUsers = async (title, description, userIds, notificationType = "general") => {
+  const notifyUsers = useCallback(async (title, description, userIds, notificationType = "general") => {
     try {
       await api.post('/notifications', {
         title,
@@ -164,11 +164,11 @@ export const NotificationProvider = ({ children }) => {
       console.error("Error sending notification", error)
       return false
     }
-  }
+  }, [])
 
   // Teacher/admin only — notifies every member of a group (e.g. right after
   // creating a new assignment for that group).
-  const notifyGroup = async (groupId, title, description, notificationType = "assignment") => {
+  const notifyGroup = useCallback(async (groupId, title, description, notificationType = "assignment") => {
     try {
       await api.post('/notifications/bulk', {
         title,
@@ -182,23 +182,23 @@ export const NotificationProvider = ({ children }) => {
       console.error("Error sending group notification", error)
       return false
     }
-  }
+  }, [])
+
+  const value = useMemo(() => ({
+    notifications,
+    unreadCount,
+    fetching,
+    markAsRead,
+    markAllRead,
+    deleteNotification,
+    clearAll,
+    notifyGroup,
+    notifyUsers,
+    fetchAll
+  }), [notifications, unreadCount, fetching, markAsRead, markAllRead, deleteNotification, clearAll, notifyGroup, notifyUsers, fetchAll])
 
   return (
-    <NotificationContext.Provider
-      value={{
-        notifications,
-        unreadCount,
-        fetching,
-        markAsRead,
-        markAllRead,
-        deleteNotification,
-        clearAll,
-        notifyGroup,
-        notifyUsers,
-        fetchAll
-      }}
-    >
+    <NotificationContext.Provider value={value}>
       {children}
     </NotificationContext.Provider>
   )

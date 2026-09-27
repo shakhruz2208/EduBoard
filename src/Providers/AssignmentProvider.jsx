@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react"
 import api from "../api"
 import { toast } from "react-toastify"
 import { useAuth } from "./AuthProvider"
@@ -36,6 +36,9 @@ export const AssignmentProvider = ({ children }) => {
     try {
       setFetching(true)
       const isTeacher = Boolean(user?.teacher)
+      // The backend now scopes every endpoint per role: /objects returns only
+      // this teacher's assignments and /teacher/homework only their students'
+      // submissions. Students get their own groups via /objects + /homework.
       const results = await Promise.allSettled(isTeacher
         ? [api.get('/objects'), api.get('/teacher/homework')]
         : [api.get('/objects'), api.get('/homework'), api.get('/me/homework')])
@@ -73,10 +76,14 @@ export const AssignmentProvider = ({ children }) => {
                 : memberResult.value.data?.items
               ;(members || []).forEach((member) => studentsById.set(member.id, member))
             })
-            setSubmissions(homework.map((item) => {
-              const student = studentsById.get(item.student_id)
-              return normalizeSubmission(item, student?.email, student?.full_name)
-            }))
+            // Submissions for other teachers' assignments must not leak in.
+            const myAssignmentIds = new Set((assignments || []).map((item) => String(item.id)))
+            setSubmissions(homework
+              .filter((item) => myAssignmentIds.has(String(item.object_id)))
+              .map((item) => {
+                const student = studentsById.get(item.student_id)
+                return normalizeSubmission(item, student?.email, student?.full_name)
+              }))
           } else {
             // /me/homework and /homework can return the same submission twice —
             // dedupe by submission id before normalizing.
@@ -148,9 +155,17 @@ export const AssignmentProvider = ({ children }) => {
         })
       }
       knownIdsRef.current = ids
+      // Skip the state update when nothing changed — otherwise every 30s poll
+      // re-renders every consumer of this context even with zero new data.
       setAssignmentsList((prev) => {
         const prevById = new Map(prev.map((item) => [String(item.id), item]))
-        return rows.map((item) => prevById.get(String(item.id))?.submitted ? { ...item, submitted: true } : item)
+        let changed = prev.length !== rows.length
+        const next = rows.map((item) => {
+          const old = prevById.get(String(item.id))
+          if (old?.submitted) changed = changed || item.submitted !== true
+          return old?.submitted ? { ...item, submitted: true } : item
+        })
+        return changed ? next : prev
       })
     } catch { /* silent — poll only enhances the base fetch */ }
   }, [])
@@ -162,7 +177,7 @@ export const AssignmentProvider = ({ children }) => {
     return () => clearInterval(interval)
   }, [isAuth, fetchAndToastNew])
 
-  const addAssignment = async (name, description, deadline, groupId) => {
+  const addAssignment = useCallback(async (name, description, deadline, groupId) => {
     if (!name.trim() || !groupId) return false
     try {
       setCreating(true)
@@ -192,9 +207,9 @@ export const AssignmentProvider = ({ children }) => {
     } finally {
       setCreating(false)
     }
-  }
+  }, [])
 
-  const deleteAssignment = async (assignmentId) => {
+  const deleteAssignment = useCallback(async (assignmentId) => {
     try {
       setDeletingId(assignmentId)
       await api.delete(`/object/${assignmentId}`)
@@ -209,9 +224,9 @@ export const AssignmentProvider = ({ children }) => {
     } finally {
       setDeletingId(null)
     }
-  }
+  }, [])
 
-  const submitAssignment = async (assignmentId, text, studentName, studentEmail) => {
+  const submitAssignment = useCallback(async (assignmentId, text, studentName, studentEmail) => {
     const submissionUrl = text.trim()
     if (!submissionUrl) return false
 
@@ -256,9 +271,9 @@ export const AssignmentProvider = ({ children }) => {
     } finally {
       setSubmittingId(null)
     }
-  }
+  }, [assignmentsList])
 
-  const gradeSubmission = async (submissionId, grade, feedback) => {
+  const gradeSubmission = useCallback(async (submissionId, grade, feedback) => {
     const key = String(submissionId)
     try {
       setGradingKey(key)
@@ -290,37 +305,41 @@ export const AssignmentProvider = ({ children }) => {
     } finally {
       setGradingKey(null)
     }
-  }
+  }, [submissions, assignmentsList])
 
-  const submissionsForAssignment = (assignmentId) =>
-    submissions.filter((s) => String(s.assignmentId) === String(assignmentId))
+  const submissionsForAssignment = useCallback((assignmentId) =>
+    submissions.filter((s) => String(s.assignmentId) === String(assignmentId)),
+  [submissions])
 
-  const mySubmission = (assignmentId, studentEmail) =>
+  const mySubmission = useCallback((assignmentId, studentEmail) =>
     submissions.find((s) => (
       String(s.assignmentId) === String(assignmentId) &&
       (!s.studentEmail || !studentEmail ||
         String(s.studentEmail).toLowerCase() === String(studentEmail).toLowerCase())
-    )) || null
+    )) || null,
+  [submissions])
+
+  // Memoized so consumers only re-render when actual data changes, not on
+  // every provider render (context value identity was unstable before).
+  const value = useMemo(() => ({
+    assignmentsList,
+    submissions,
+    fetching,
+    creating,
+    submittingId,
+    gradingKey,
+    deletingId,
+    fetchAssignments: fetchAll,
+    addAssignment,
+    deleteAssignment,
+    submitAssignment,
+    gradeSubmission,
+    submissionsForAssignment,
+    mySubmission
+  }), [assignmentsList, submissions, fetching, creating, submittingId, gradingKey, deletingId, fetchAll, addAssignment, deleteAssignment, submitAssignment, gradeSubmission, submissionsForAssignment, mySubmission])
 
   return (
-    <AssignmentContext.Provider
-      value={{
-        assignmentsList,
-        submissions,
-        fetching,
-        creating,
-        submittingId,
-        gradingKey,
-        deletingId,
-        fetchAssignments: fetchAll,
-        addAssignment,
-        deleteAssignment,
-        submitAssignment,
-        gradeSubmission,
-        submissionsForAssignment,
-        mySubmission
-      }}
-    >
+    <AssignmentContext.Provider value={value}>
       {children}
     </AssignmentContext.Provider>
   )

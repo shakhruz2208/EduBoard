@@ -1,11 +1,11 @@
-import { createContext, useContext, useState } from "react"
+import { createContext, useContext, useState, useCallback, useMemo } from "react"
 
 const LanguageContext = createContext(null)
 
 const LANGUAGES = ["uz", "en", "ru"]
 
 const translations = {
-  brand: { uz: "DevsClub.uz", en: "DevsClub.uz", ru: "DevsClub.uz" },
+  brand: { uz: "CodeUp.uz", en: "CodeUp.uz", ru: "CodeUp.uz" },
   nav_assignments: { uz: "Topshiriqlar", en: "Assignments", ru: "Задания" },
   nav_rating: { uz: "Reyting", en: "Rating", ru: "Рейтинг" },
   nav_grades: { uz: "Baholar", en: "Grades", ru: "Оценки" },
@@ -270,7 +270,6 @@ const translations = {
 
   // Teacher assignment detail
   assigned_by: { uz: "Bergan ustoz", en: "Assigned by", ru: "Задал учитель" },
-  graded_word: { uz: "baholangan", en: "graded", ru: "оценено" },
   no_submissions_yet: {
     uz: "Hech kim bu topshiriqni hali yubormagan.",
     en: "No student has submitted this assignment yet.",
@@ -295,9 +294,9 @@ const translations = {
   new_course_placeholder: { uz: "masalan: 10-A sinf", en: "e.g. Group 10-A", ru: "например: Группа 10-А" },
   create_course: { uz: "Yaratish", en: "Create", ru: "Создать" },
   no_courses_yet: {
-    uz: "Hali kurs yaratmagansiz — yuqoridan qo'shing, shunda o'quvchilar ro'yxatdan o'tishda tanlay oladi.",
-    en: "You haven't created any courses yet — add one above so students can pick it during registration.",
-    ru: "Вы ещё не создали курс — добавьте выше, чтобы ученики могли выбрать его при регистрации."
+    uz: "Hali kurs yaratmagansiz — yuqoridan yarating, keyin o'quvchilarni kurs nomi yoki student kodi bo'yicha qo'shasiz.",
+    en: "You haven't created any courses yet — create one above, then add students by email or student code.",
+    ru: "Вы ещё не создали курс — создайте его выше, затем добавляйте учеников по email или коду ученика."
   },
   students_word: { uz: "o'quvchi", en: "students", ru: "учеников" },
   courses_word: { uz: "ta kurs", en: "courses", ru: "курсов" },
@@ -449,30 +448,94 @@ const translations = {
   awaiting_grade: { uz: "Tekshirilmoqda", en: "Awaiting grade", ru: "Ожидает проверки" },
   grade_trend: { uz: "Baho dinamikasi", en: "Grade trend", ru: "Динамика оценок" },
   grade_distribution: { uz: "Baholar taqsimoti", en: "Grade distribution", ru: "Распределение оценок" },
-  students_word: { uz: "o'quvchi", en: "student", ru: "ученик" },
   chart_empty: { uz: "Hozircha ma'lumot yo'q", en: "No data yet", ru: "Пока нет данных" },
   avg_word: { uz: "o'rtacha", en: "average", ru: "средняя" },
+
+  // Password reset (forgot / reset)
+  forgot_password_link: { uz: "Parolni unutdingizmi?", en: "Forgot password?", ru: "Забыли пароль?" },
+  forgot_password_title: { uz: "Parolni tiklash", en: "Reset password", ru: "Сброс пароля" },
+  forgot_password_subtitle: {
+    uz: "Emailingizni kiriting — sizga parolni tiklash havolasini yuboramiz.",
+    en: "Enter your email — we'll send you a reset link.",
+    ru: "Введите ваш email — мы отправим ссылку для сброса пароля."
+  },
+  forgot_password_send_btn: { uz: "Havola yuborish", en: "Send reset link", ru: "Отправить ссылку" },
+  forgot_password_sending: { uz: "Yuborilmoqda...", en: "Sending...", ru: "Отправка..." },
+  forgot_password_sent_title: { uz: "Email yuborildi!", en: "Email sent!", ru: "Письмо отправлено!" },
+  forgot_password_sent_msg: {
+    uz: (email) => `${email} manziliga parolni tiklash havolasi yuborildi. Spam papkasini ham tekshiring.`,
+    en: (email) => `We sent a password reset link to ${email}. Check your spam folder too.`,
+    ru: (email) => `Мы отправили ссылку для сброса пароля на ${email}. Проверьте и папку «Спам».`
+  },
+  forgot_password_unsupported: {
+    uz: "Server hali bu imkoniyatni qo'llab-quvvatlamaydi. Iltimos, ustozingiz yoki admin bilan bog'laning.",
+    en: "The server doesn't support this feature yet. Please contact your teacher or admin.",
+    ru: "Сервер пока не поддерживает эту функцию. Обратитесь к учителю или администратору."
+  },
+  forgot_password_rate_limited: {
+    uz: "Juda ko'p urinish bo'ldi. 10 daqiqadan keyin qaytadan urinib ko'ring.",
+    en: "Too many attempts. Please try again in 10 minutes.",
+    ru: "Слишком много попыток. Попробуйте снова через 10 минут."
+  },
+  forgot_password_error: {
+    uz: "Serverga ulanib bo'lmadi — so'rov yuborilmadi bo'lishi mumkin. Internetni tekshirib, qaytadan urinib ko'ring (server birinchi so'rovda uyg'onishi mumkin).",
+    en: "Could not reach the server — the request may not have been sent. Check your connection and try again (the server may need a minute to wake up).",
+    ru: "Не удалось связаться с сервером — запрос мог не отправиться. Проверьте соединение и попробуйте снова (сервер может просыпаться до минуты)."
+  },
+  forgot_password_try_again: {
+    uz: "Qaytadan urinish",
+    en: "Try again",
+    ru: "Попробовать снова"
+  },
+  reset_password_title: { uz: "Yangi parol", en: "New password", ru: "Новый пароль" },
+  reset_password_subtitle: { uz: "Hisobingiz uchun yangi parolni kiriting.", en: "Choose a new password for your account.", ru: "Придумайте новый пароль для вашего аккаунта." },
+  reset_password_btn: { uz: "Parolni saqlash", en: "Save password", ru: "Сохранить пароль" },
+  reset_password_saving: { uz: "Saqlanmoqda...", en: "Saving...", ru: "Сохранение..." },
+  reset_password_success: {
+    uz: "Parol o'zgartirildi! Endi yangi parol bilan tizimga kiring.",
+    en: "Password changed! Now log in with your new password.",
+    ru: "Пароль изменён! Теперь войдите с новым паролем."
+  },
+  reset_password_token_invalid: {
+    uz: "Havola yaroqsiz yoki muddati tugagan. Iltimos, qaytadan so'rang.",
+    en: "This link is invalid or has expired. Please request a new one.",
+    ru: "Ссылка недействительна или срок её действия истёк. Запросите новую."
+  },
+  reset_password_missing_token: {
+    uz: "Havola noto'g'ri — tokenni o'z ichiga olmaydi.",
+    en: "Invalid link — it doesn't contain a token.",
+    ru: "Неверная ссылка — она не содержит токен."
+  },
+  reset_password_error_generic: {
+    uz: "Parolni saqlashda xatolik. Iltimos, qaytadan urinib ko'ring.",
+    en: "Could not save the password. Please try again.",
+    ru: "Не удалось сохранить пароль. Попробуйте ещё раз."
+  },
+  back_to_login: { uz: "Kirish sahifasiga qaytish", en: "Back to login", ru: "Вернуться ко входу" },
 }
 
 export const LanguageProvider = ({ children }) => {
   const [lang, setLang] = useState(() => localStorage.getItem('app_lang') || 'uz')
 
-  const changeLang = (code) => {
+  const changeLang = useCallback((code) => {
     if (!LANGUAGES.includes(code)) return
     setLang(code)
     localStorage.setItem('app_lang', code)
-  }
+  }, [])
 
-  // t('key') for plain strings, t('key', arg1, arg2) for the few function-based ones
-  const t = (key, ...args) => {
+  // t('key') for plain strings, t('key', arg1, arg2) for the few function-based ones.
+  // useCallback keeps t stable per language so memoized children don't re-render.
+  const t = useCallback((key, ...args) => {
     const entry = translations[key]
     if (!entry) return key
     const value = entry[lang] ?? entry.en
     return typeof value === "function" ? value(...args) : value
-  }
+  }, [lang])
+
+  const value = useMemo(() => ({ lang, changeLang, t, LANGUAGES }), [lang, changeLang, t])
 
   return (
-    <LanguageContext.Provider value={{ lang, changeLang, t, LANGUAGES }}>
+    <LanguageContext.Provider value={value}>
       {children}
     </LanguageContext.Provider>
   )

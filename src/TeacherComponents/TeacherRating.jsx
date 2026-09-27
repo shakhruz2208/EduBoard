@@ -51,7 +51,11 @@ const TeacherRating = () => {
   useEffect(() => {
     let cancelled = false
     api.get('/teacher/students')
-      .then((response) => { if (!cancelled) setStudents(Array.isArray(response.data) ? response.data : response.data?.items || []) })
+      .then((response) => {
+        if (cancelled) return
+        const rows = Array.isArray(response.data) ? response.data : response.data?.items || []
+        setStudents(rows)
+      })
       .catch(() => { if (!cancelled) setStudents([]) })
       .finally(() => { if (!cancelled) setStudentsFetching(false) })
     return () => { cancelled = true }
@@ -59,6 +63,8 @@ const TeacherRating = () => {
 
   useEffect(() => {
     let cancelled = false
+    // /teacher/homework is scoped server-side to this teacher's courses —
+    // no client-side filtering needed.
     api.get('/teacher/homework')
       .then((response) => {
         if (cancelled) return

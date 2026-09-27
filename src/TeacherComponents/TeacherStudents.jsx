@@ -100,6 +100,8 @@ const TeacherStudents = () => {
   }, [courses])
 
   const studentsWithProgress = useMemo(() => students
+    // /teacher/students is already scoped server-side to this teacher's
+    // courses — only the course tab filter remains client-side.
     .filter((student) => selectedCourse === 'all' || String(student.group_id) === String(selectedCourse))
     .map((student) => {
       const studentSubmissions = submissions.filter((submission) => String(submission.studentId) === String(student.id))

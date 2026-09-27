@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback } from "react"
+import { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react"
 import api from "../api"
 import { toast } from "react-toastify"
 import { useAuth } from "./AuthProvider"
@@ -7,6 +7,9 @@ const CourseContext = createContext(null)
 
 export const CourseProvider = ({ children }) => {
   const { isAuth, user } = useAuth()
+  // The server scopes this list per role: students get their own groups via
+  // /me/groups, teachers only the groups they own via /groups. No client-side
+  // filtering needed anymore.
   const [courses, setCourses] = useState([])
   const [myGroup, setMyGroup] = useState(null) // the student's own group, or null if not joined
   const [groupMembers, setGroupMembers] = useState({}) // { [groupId]: [UserMemberResponse, ...] }
@@ -76,7 +79,7 @@ export const CourseProvider = ({ children }) => {
     }
   }, [isAuth, fetchAll])
 
-  const addCourse = async (name, description) => {
+  const addCourse = useCallback(async (name, description) => {
     if (!name.trim()) return false
     try {
       setCreating(true)
@@ -93,9 +96,9 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setCreating(false)
     }
-  }
+  }, [])
 
-  const deleteCourse = async (groupId) => {
+  const deleteCourse = useCallback(async (groupId) => {
     try {
       await api.delete(`/group/${groupId}`)
       setCourses((prev) => prev.filter((c) => c.id !== groupId))
@@ -106,7 +109,7 @@ export const CourseProvider = ({ children }) => {
       toast.error(typeof detail === 'string' ? detail : 'Error deleting course')
       return false
     }
-  }
+  }, [])
 
   // Teacher views the roster for one of their courses
   const fetchGroupMembers = useCallback(async (groupId) => {
@@ -123,7 +126,7 @@ export const CourseProvider = ({ children }) => {
 
   // Teacher/admin only — adds a student to a group.
   // Accepts numeric user_id or email string.
-  const addStudentToGroup = async (groupId, userIdOrEmail) => {
+  const addStudentToGroup = useCallback(async (groupId, userIdOrEmail) => {
     if (!userIdOrEmail) return false
     const trimmed = String(userIdOrEmail).trim()
     const key = `${groupId}:${trimmed}`
@@ -174,12 +177,12 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setJoiningId(null)
     }
-  }
+  }, [courses, fetchGroupMembers, fetchMyGroup])
 
   // The backend validates the group before the user on member deletion, so the
   // frontend mirrors that order: verify the group exists and belongs to the
   // teacher first, then issue the delete against a known-good group id.
-  const removeMember = async (groupId, userId) => {
+  const removeMember = useCallback(async (groupId, userId) => {
     const key = `${groupId}:${userId}`
     try {
       setRemovingKey(key)
@@ -220,10 +223,10 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setRemovingKey(null)
     }
-  }
+  }, [groupMembers, fetchGroupMembers, fetchCourses])
 
   // Teacher/admin only — edit a course's name/description
-  const updateCourse = async (groupId, { name, description }) => {
+  const updateCourse = useCallback(async (groupId, { name, description }) => {
     try {
       setUpdatingId(groupId)
       const res = await api.patch(`/group/${groupId}`, {
@@ -240,10 +243,10 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setUpdatingId(null)
     }
-  }
+  }, [])
 
   // Teacher only — promote/demote a group member to/from admin
-  const promoteToAdmin = async (groupId, userId) => {
+  const promoteToAdmin = useCallback(async (groupId, userId) => {
     const key = `${groupId}:${userId}`
     try {
       setAdminKey(key)
@@ -260,9 +263,9 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setAdminKey(null)
     }
-  }
+  }, [])
 
-  const demoteFromAdmin = async (groupId, userId) => {
+  const demoteFromAdmin = useCallback(async (groupId, userId) => {
     const key = `${groupId}:${userId}`
     try {
       setAdminKey(key)
@@ -279,31 +282,33 @@ export const CourseProvider = ({ children }) => {
     } finally {
       setAdminKey(null)
     }
-  }
+  }, [])
+
+  // Memoized so consumers only re-render when actual data changes
+  const value = useMemo(() => ({
+    courses,          // server-scoped per role — only this user's relevant groups
+    allCourses: courses,
+    myGroup,
+    groupMembers,
+    fetching,
+    creating,
+    joiningId,
+    removingKey,
+    updatingId,
+    adminKey,
+    addCourse,
+    deleteCourse,
+    updateCourse,
+    addStudentToGroup,
+    fetchGroupMembers,
+    removeMember,
+    promoteToAdmin,
+    demoteFromAdmin,
+    fetchAll
+  }), [courses, myGroup, groupMembers, fetching, creating, joiningId, removingKey, updatingId, adminKey, addCourse, deleteCourse, updateCourse, addStudentToGroup, fetchGroupMembers, removeMember, promoteToAdmin, demoteFromAdmin, fetchAll])
 
   return (
-    <CourseContext.Provider
-      value={{
-        courses,
-        myGroup,
-        groupMembers,
-        fetching,
-        creating,
-        joiningId,
-        removingKey,
-        updatingId,
-        adminKey,
-        addCourse,
-        deleteCourse,
-        updateCourse,
-        addStudentToGroup,
-        fetchGroupMembers,
-        removeMember,
-        promoteToAdmin,
-        demoteFromAdmin,
-        fetchAll
-      }}
-    >
+    <CourseContext.Provider value={value}>
       {children}
     </CourseContext.Provider>
   )

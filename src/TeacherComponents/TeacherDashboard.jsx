@@ -35,7 +35,7 @@ const TeacherDashboard = () => {
   const { assignmentsList, submissions, fetching, deleteAssignment, gradeSubmission, gradingKey, submissionsForAssignment } = useAssignments()
   const { t } = useLanguage()
   const navigate = useNavigate()
-  const { courses, groupMembers, fetchGroupMembers } = useCourses()
+  const { courses, groupMembers, fetchGroupMembers, fetching: coursesFetching } = useCourses()
   const { archiveMode, setArchiveMode } = useArchiveSettings()
 
   /* ── State ── */
@@ -169,22 +169,38 @@ const TeacherDashboard = () => {
     [lessons]
   )
 
-  const allAssignments = [...assignmentsList, ...lessonActivities]
+  const allAssignments = useMemo(() => [...assignmentsList, ...lessonActivities], [assignmentsList, lessonActivities])
   // Finished weeks leave the dashboard — the archive holds them (nothing deleted).
-  const activeAssignments = allAssignments.filter((item) => !isObjectArchived(item))
+  const activeAssignments = useMemo(() => allAssignments.filter((item) => !isObjectArchived(item)), [allAssignments])
   const archivedCount = allAssignments.length - activeAssignments.length
   // Newest deadlines first so the latest work is at the top.
-  const byNewest = [...activeAssignments].sort((a, b) => {
+  const byNewest = useMemo(() => [...activeAssignments].sort((a, b) => {
     const ta = new Date(a.deadline || a.starts_at || a.date || a.created_at || 0).getTime() || 0
     const tb = new Date(b.deadline || b.starts_at || b.date || b.created_at || 0).getTime() || 0
     return tb - ta
-  })
+  }), [activeAssignments])
   // Filter by selected lesson if one is chosen
-  const filteredAssignments = selectedLesson
-    ? byNewest.filter((a) => String(a.lessonId) === String(selectedLesson.id))
-    : byNewest
+  const filteredAssignments = useMemo(
+    () => (selectedLesson
+      ? byNewest.filter((a) => String(a.lessonId) === String(selectedLesson.id))
+      : byNewest),
+    [byNewest, selectedLesson]
+  )
   const displayedAssignments = showAll ? filteredAssignments : filteredAssignments.slice(0, 4)
-  const pendingReviews = submissions.filter((s) => s.grade == null).length
+  const pendingReviews = useMemo(
+    () => submissions.reduce((n, s) => (s.grade == null ? n + 1 : n), 0),
+    [submissions]
+  )
+  // Submissions per assignment id, precomputed once — the old code ran a full
+  // submissions.filter() for every rendered assignment (O(n×m) per render).
+  const submissionCountByAssignment = useMemo(() => {
+    const counts = new Map()
+    submissions.forEach((s) => {
+      const key = String(s.assignmentId)
+      counts.set(key, (counts.get(key) || 0) + 1)
+    })
+    return counts
+  }, [submissions])
 
   /* ═══ HANDLERS ═══ */
 
@@ -520,6 +536,27 @@ const TeacherDashboard = () => {
           </div>
         </div>
 
+        {/* ═══ ONBOARDING: no courses yet ═══ */}
+        {!coursesFetching && courses.length === 0 && (
+          <div className="relative rounded-3xl border border-dashed border-indigo-500/30 bg-[#081340]/60 p-8 sm:p-12 flex flex-col items-center gap-4 text-center overflow-hidden">
+            <div className="absolute -top-10 -left-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl" />
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-lime-400/20 to-emerald-400/10 border border-lime-400/20 flex items-center justify-center">
+              <IoSchoolOutline className="text-3xl text-lime-300" />
+            </div>
+            <div>
+              <h2 className="text-white font-bold text-xl">{t("no_courses_yet")}</h2>
+              <p className="text-indigo-300/70 text-sm mt-1 max-w-md">{t("my_courses_subtitle")}</p>
+            </div>
+            <button
+              onClick={() => navigate("/teacher-course")}
+              className="flex items-center gap-2 bg-gradient-to-r from-lime-400 to-emerald-400 text-black font-bold px-6 py-3 rounded-xl hover:shadow-[0_0_25px_rgba(163,230,53,0.35)] transition-all cursor-pointer"
+            >
+              <IoAdd className="text-lg" />
+              {t("create_course")}
+            </button>
+          </div>
+        )}
+
         {/* ═══ ANALYTICS CHARTS ═══ */}
         <TeacherAnalytics courses={courses} assignmentsList={allAssignments} submissions={submissions} />
 
@@ -709,7 +746,7 @@ const TeacherDashboard = () => {
                 <div className="flex flex-col gap-2">
                   {displayedAssignments.map((item) => {
                     const c = item.isActivity ? (kindColors[item.kind || item.activityType] || kindColors.homework) : null
-                    const subCount = submissions.filter((s) => String(s.assignmentId) === String(item.objectId ?? item.id)).length
+                    const subCount = submissionCountByAssignment.get(String(item.objectId ?? item.id)) || 0
                     return (
                       <div key={item.id} className="group/item bg-[#0a0f35] border border-indigo-500/10 rounded-xl p-3.5 hover:border-indigo-400/25 hover:bg-[#0e1445] transition-all duration-200">
                         <div className="flex items-center gap-3">

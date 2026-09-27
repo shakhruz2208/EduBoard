@@ -175,6 +175,7 @@ const Login = () => {
               {t('no_account')}{" "}
               <Link className="text-indigo-400 underline" to='/register'>{t('register_link')}</Link>
             </h1>
+
           </div>
         </div>
       </form>

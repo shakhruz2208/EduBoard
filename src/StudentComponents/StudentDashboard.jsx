@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from "react"
+import { useMemo, useState, useEffect, useRef, useCallback } from "react"
 import { useNavigate } from "react-router-dom"
 import { HiOutlineBookOpen, HiOutlineClipboardList } from "react-icons/hi"
 import { FaRegStar } from "react-icons/fa"
@@ -113,13 +113,16 @@ const StudentDashboard = () => {
   const studentFullName = user?.full_name || "Unknown Student"
   const studentName = useMemo(() => studentFullName.split(" ")[0] || "Student", [studentFullName])
 
-  const hasMySubmission = (item) => Boolean(item.submitted || mySubmission(item.id, user?.email))
+  const hasMySubmission = useCallback((item) => Boolean(item.submitted || mySubmission(item.id, user?.email)), [mySubmission, user?.email])
 
   // Deadline reminders: every 5 minutes check pending work and toast when a
   // deadline is within 24h (and again within 1h). Each threshold fires once.
-  // Latest values are read through a ref so the interval is started once.
+  // Latest values are read through a ref updated in an effect (never during
+  // render) so the watcher interval itself only starts once.
   const deadlineDeps = useRef({})
-  deadlineDeps.current = { assignmentsList, lessonActivities, mySubmission, user, t }
+  useEffect(() => {
+    deadlineDeps.current = { assignmentsList, lessonActivities, mySubmission, user, t }
+  })
   useEffect(() => {
     const stop = startDeadlineWatcher(
       () => { const d = deadlineDeps.current; return [...d.assignmentsList, ...d.lessonActivities] },
@@ -194,11 +197,13 @@ const StudentDashboard = () => {
     [assignmentsList, lessonActivities, courseFilter, courseOptions]
   )
 
-  const pendingCount = myGroupAssignments.filter((item) => !hasMySubmission(item)).length
-
-  const visibleAssignments = filter === "pending"
-    ? myGroupAssignments.filter((item) => !hasMySubmission(item))
-    : myGroupAssignments
+  // Both derived lists scan assignments and call mySubmission — memoizing them
+  // keeps the O(n) submission lookups from running on every unrelated render.
+  const pendingAssignments = useMemo(
+    () => myGroupAssignments.filter((item) => !hasMySubmission(item)),
+    [myGroupAssignments, hasMySubmission]
+  )
+  const visibleAssignments = filter === "pending" ? pendingAssignments : myGroupAssignments
 
   return (
     <div className="relative min-h-screen w-full bg-[#03071e] flex">
@@ -220,7 +225,7 @@ const StudentDashboard = () => {
           {t('hi')}, <span className="bg-gradient-to-r from-emerald-400 to-purple-400 bg-clip-text text-transparent">{studentName}!</span>
         </h1>
         <p className="text-indigo-300 text-sm sm:text-base mb-8">
-          {t('student_summary', myGroupAssignments.length, pendingCount)}
+          {t('student_summary', myGroupAssignments.length, pendingAssignments.length)}
         </p>
 
         {courses.length === 0 && (

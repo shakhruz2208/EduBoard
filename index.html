@@ -1,10 +1,41 @@
 <!doctype html>
-<html lang="en">
+<html lang="uz">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/png" href="/logo1.png" />
+    <link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DevsClub</title>
+    <meta name="description" content="CodeUp.uz — Bilimga yangi qadam. O'quv markazlari uchun topshiriq, dars va baholash platformasi." />
+    <meta name="theme-color" content="#03071e" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="CodeUp" />
+
+    <!-- Open Graph: Telegram / Instagram / Facebook link previews -->
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="CodeUp.uz" />
+    <meta property="og:title" content="CodeUp.uz — Bilimga yangi qadam" />
+    <meta property="og:description" content="O'quv markazlari uchun topshiriq, dars va baholash platformasi. O'quvchilar reytingi, uy ishlari va davomat bir joyda." />
+    <meta property="og:image" content="/logo1.png" />
+    <meta property="og:image:width" content="1254" />
+    <meta property="og:image:height" content="1254" />
+    <meta property="og:locale" content="uz_UZ" />
+
+    <!-- Twitter/X card -->
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="CodeUp.uz — Bilimga yangi qadam" />
+    <meta name="twitter:description" content="O'quv markazlari uchun topshiriq, dars va baholash platformasi." />
+    <meta name="twitter:image" content="/logo1.png" />
+
+    <!-- Backend API is on another origin: warm the connection during HTML parse -->
+    <link rel="preconnect" href="https://api-4hjf.onrender.com" />
+    <link rel="dns-prefetch" href="https://api-4hjf.onrender.com" />
+
+    <title>CodeUp.uz — Bilimga yangi qadam</title>
   </head>
   <body>
     <div id="root"></div>
