@@ -1,0 +1,27 @@
+{
+  "name": "CodeUp.uz — Bilimga yangi qadam",
+  "short_name": "CodeUp",
+  "description": "CodeUp.uz — o'quv markazlari uchun topshiriq, dars va baholash platformasi",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#03071e",
+  "theme_color": "#03071e",
+  "lang": "uz",
+  "icons": [
+    {
+      "src": "/pwa-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/pwa-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}
